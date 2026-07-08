@@ -1,53 +1,44 @@
-"""示例测试：使用 httpbin.org 作为公开 API 演示"""
 import pytest
 import requests
 
+from core.mock_server import start_mock_server, stop_mock_server
 
-class TestHttpBin:
-    """以 httpbin.org 为练习目标的演示用例"""
 
-    BASE_URL = "https://httpbin.org"
+session = requests.Session()
+session.trust_env = False
 
-    def test_get_request(self):
-        """演示 GET 请求"""
-        response = requests.get(f"{self.BASE_URL}/get", params={"foo": "bar"})
+
+@pytest.fixture(scope="module")
+def mock_server():
+    server, port = start_mock_server()
+    yield port
+    stop_mock_server(server)
+
+
+class TestMockApi:
+    def test_payment_success(self, mock_server):
+        response = session.post(f"http://localhost:{mock_server}/api/payment/status", timeout=2)
+
         assert response.status_code == 200
         data = response.json()
-        assert data["args"]["foo"] == "bar"
+        assert data["code"] == 0
+        assert data["data"]["status"] == "paid"
 
-    def test_post_json(self):
-        """演示 POST JSON 请求"""
-        payload = {"name": "test", "value": 123}
-        response = requests.post(f"{self.BASE_URL}/post", json=payload)
-        assert response.status_code == 200
-        data = response.json()
-        assert data["json"]["name"] == "test"
+    def test_payment_timeout(self, mock_server):
+        response = session.post(f"http://localhost:{mock_server}/api/payment/timeout", timeout=2)
 
-    @pytest.mark.parametrize("status_code", [200, 301, 404, 500])
-    def test_status_codes(self, status_code):
-        """参数化演示：测试多个 HTTP 状态码"""
-        response = requests.get(f"{self.BASE_URL}/status/{status_code}")
-        assert response.status_code == status_code
+        assert response.status_code == 504
+        assert response.json()["message"] == "请求超时"
 
-    def test_delayed_response(self):
-        """演示超时处理：模拟延迟响应"""
-        response = requests.get(f"{self.BASE_URL}/delay/2", timeout=5)
-        assert response.status_code == 200
+    @pytest.mark.parametrize(
+        ("payload", "expected_status"),
+        [
+            ({"username": "admin", "password": "123456"}, 200),
+            ({"username": "admin", "password": "wrong"}, 401),
+            ({"username": "nobody", "password": "123"}, 404),
+        ],
+    )
+    def test_login_status(self, mock_server, payload, expected_status):
+        response = session.post(f"http://localhost:{mock_server}/api/login", json=payload, timeout=2)
 
-    def test_headers_inspection(self):
-        """演示请求头/响应头分析"""
-        response = requests.get(
-            f"{self.BASE_URL}/headers",
-            headers={"X-Custom-Header": "test-value"}
-        )
-        data = response.json()
-        assert data["headers"]["X-Custom-Header"] == "test-value"
-
-    def test_mock_server_available(self):
-        """验证 Mock 服务是否可访问（集成测试前哨）"""
-        try:
-            response = requests.post("http://localhost:5000/api/payment/status", timeout=2)
-            assert response.status_code == 200
-            print("✅ Mock 服务可用")
-        except requests.ConnectionError:
-            pytest.skip("Mock 服务未启动，跳过该用例")
+        assert response.status_code == expected_status

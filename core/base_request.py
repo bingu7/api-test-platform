@@ -12,6 +12,7 @@ class BaseRequest:
 
     def _create_session(self) -> requests.Session:
         session = requests.Session()
+        session.trust_env = False  # 跳过系统代理，避免 Clash 等代理干扰
         retry = Retry(
             total=3,
             backoff_factor=0.5,
