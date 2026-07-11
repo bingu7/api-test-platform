@@ -1,3 +1,4 @@
+import allure
 import pytest
 import requests
 
@@ -16,6 +17,9 @@ def mock_server():
 
 
 class TestMockApi:
+    @allure.feature("支付模块")
+    @allure.story("Mock 模拟支付")
+    @allure.severity(allure.severity_level.BLOCKER)
     def test_payment_success(self, mock_server):
         response = session.post(f"http://localhost:{mock_server}/api/payment/status", timeout=2)
 
@@ -24,12 +28,18 @@ class TestMockApi:
         assert data["code"] == 0
         assert data["data"]["status"] == "paid"
 
+    @allure.feature("支付模块")
+    @allure.story("Mock 模拟超时")
+    @allure.severity(allure.severity_level.NORMAL)
     def test_payment_timeout(self, mock_server):
         response = session.post(f"http://localhost:{mock_server}/api/payment/timeout", timeout=2)
 
         assert response.status_code == 504
         assert response.json()["message"] == "请求超时"
 
+    @allure.feature("登录模块")
+    @allure.story("Mock 模拟登录场景")
+    @allure.severity(allure.severity_level.CRITICAL)
     @pytest.mark.parametrize(
         ("payload", "expected_status"),
         [

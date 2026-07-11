@@ -1,4 +1,5 @@
 """数据驱动测试：使用 Excel + Mock 服务，测试登录接口"""
+import allure
 import pytest
 from core.base_request import BaseRequest
 from core.token_manager import TokenManager
@@ -20,7 +21,8 @@ def mock_server():
 class TestLogin:
 
     @pytest.fixture(scope="class")
-    def br(self):
+    @classmethod
+    def br(cls):
         """创建一个指向 Mock 服务的 BaseRequest"""
         tm = TokenManager(
             auth_url="http://localhost:5000/api/login",
@@ -28,13 +30,27 @@ class TestLogin:
         )
         return BaseRequest(base_url="http://localhost:5000", token_manager=tm)
 
+    @allure.feature("登录模块")
+    @allure.story("数据驱动测试")
+    @allure.title("{case[name]}")
+    @allure.severity(allure.severity_level.CRITICAL)
     @pytest.mark.parametrize("case", test_data, ids=lambda c: c["name"])
     def test_login(self, case, br):
         """数据驱动：1 个方法跑所有登录场景"""
+        allure.attach(
+            str(case["body"]),
+            name="请求参数",
+            attachment_type=allure.attachment_type.JSON
+        )
         response = br.request(
             method=case["method"],
             endpoint=case["endpoint"],
             json=case["body"]
+        )
+        allure.attach(
+            f"状态码: {response.status_code}\n响应体: {response.text}",
+            name="响应结果",
+            attachment_type=allure.attachment_type.TEXT
         )
         assert response.status_code == case["expected_status"], (
             f"用例 '{case['name']}' 失败：期望状态码 {case['expected_status']}，实际 {response.status_code}"

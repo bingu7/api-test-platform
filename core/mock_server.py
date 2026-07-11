@@ -20,6 +20,14 @@ def start_mock_server(port=5000):
     def mock_payment_timeout():
         return jsonify({"code": -1, "message": "请求超时"}), 504
 
+    @app.route("/api/user/profile", methods=["GET"])
+    def mock_user_profile():
+        return jsonify({
+            "code": 0,
+            "message": "获取成功",
+            "data": {"username": "admin", "role": "tester"},
+        })
+
     @app.route("/api/login", methods=["POST"])
     def mock_login():
         data = request.get_json()

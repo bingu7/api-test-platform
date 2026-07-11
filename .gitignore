@@ -10,3 +10,7 @@ allure-report/
 *.egg-info/
 dist/
 build/
+.agents/
+.hermes/
+IDEA.md
+skills-lock.json
