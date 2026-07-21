@@ -1,0 +1,3 @@
+# 由 pytest --alluredir 生成
+*
+!.gitignore

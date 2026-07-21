@@ -1,57 +1,36 @@
-"""数据驱动测试：使用 Excel + Mock 服务，测试登录接口"""
+"""登录接口：数据驱动 + 裸请求（auth=False）。"""
+from __future__ import annotations
+
 import allure
 import pytest
-from core.base_request import BaseRequest
-from core.token_manager import TokenManager
-from core.mock_server import start_mock_server, stop_mock_server
-from utils.excel_reader import read_test_cases
 
-# 读取 Excel 数据（模块级别，只读一次）
-test_data = read_test_cases("data/test_cases.xlsx")
+from core.base_request import HttpClient
+from utils.assert_helpers import assert_case_response
+from utils.excel_reader import filter_cases
 
-
-@pytest.fixture(scope="module", autouse=True)
-def mock_server():
-    """启动 Mock 服务"""
-    server_thread, port = start_mock_server()
-    yield port
-    stop_mock_server(server_thread)
+_LOGIN_CASES = filter_cases(endpoints={"/api/login"})
 
 
-class TestLogin:
+@allure.feature("登录模块")
+@allure.story("数据驱动")
+@pytest.mark.smoke
+@pytest.mark.parametrize("case", _LOGIN_CASES, ids=lambda c: c["name"])
+def test_login_data_driven(case: dict, raw_client: HttpClient, mock_server):
+    """
+    登录场景必须用 raw_client + auth=False。
+    若走带 Token 的客户端，负向用例会先成功登录，测的就不是登录接口本身。
+    """
+    allure.dynamic.title(case["name"])
+    allure.attach(
+        str(case.get("body")),
+        name="请求参数",
+        attachment_type=allure.attachment_type.JSON,
+    )
 
-    @pytest.fixture(scope="class")
-    @classmethod
-    def br(cls):
-        """创建一个指向 Mock 服务的 BaseRequest"""
-        tm = TokenManager(
-            auth_url="http://localhost:5000/api/login",
-            credentials={"username": "admin", "password": "123456"}
-        )
-        return BaseRequest(base_url="http://localhost:5000", token_manager=tm)
-
-    @allure.feature("登录模块")
-    @allure.story("数据驱动测试")
-    @allure.title("{case[name]}")
-    @allure.severity(allure.severity_level.CRITICAL)
-    @pytest.mark.parametrize("case", test_data, ids=lambda c: c["name"])
-    def test_login(self, case, br):
-        """数据驱动：1 个方法跑所有登录场景"""
-        allure.attach(
-            str(case["body"]),
-            name="请求参数",
-            attachment_type=allure.attachment_type.JSON
-        )
-        response = br.request(
-            method=case["method"],
-            endpoint=case["endpoint"],
-            json=case["body"]
-        )
-        allure.attach(
-            f"状态码: {response.status_code}\n响应体: {response.text}",
-            name="响应结果",
-            attachment_type=allure.attachment_type.TEXT
-        )
-        assert response.status_code == case["expected_status"], (
-            f"用例 '{case['name']}' 失败：期望状态码 {case['expected_status']}，实际 {response.status_code}"
-        )
+    response = raw_client.request(
+        case["method"],
+        case["endpoint"],
+        auth=False,
+        json=case["body"],
+    )
+    assert_case_response(response, case)

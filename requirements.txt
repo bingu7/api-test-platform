@@ -1,6 +1,12 @@
-requests==2.31.0
-pytest==8.0.0
-pandas==2.2.3
-openpyxl==3.1.2
-flask==3.0.0
-allure-pytest==2.13.5
+# HTTP & test
+requests>=2.31.0,<3
+urllib3>=2.0,<3
+pytest>=8.0,<10
+allure-pytest>=2.13.5,<3
+
+# data driven
+pandas>=2.2.0,<3
+openpyxl>=3.1.2,<4
+
+# local mock
+flask>=3.0.0,<4

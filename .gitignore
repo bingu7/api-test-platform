@@ -1,16 +1,36 @@
+# Python
 __pycache__/
-.venv/
-*.pyc
-*.pyo
-.env
-allure-results/
-allure-report/
-.idea/
-.vscode/
+*.py[cod]
 *.egg-info/
+.venv/
+venv/
 dist/
 build/
+
+# Env / secrets
+.env
+.env.local
+
+# Test / report artifacts
+.pytest_cache/
+allure-results/*
+!allure-results/.gitignore
+allure-report/
+reports/*
+!reports/.gitignore
+.coverage
+htmlcov/
+*.log
+
+# IDE / agent local
+.idea/
+.vscode/
 .agents/
 .hermes/
+.deepeval/
 IDEA.md
 skills-lock.json
+
+# OS
+Thumbs.db
+.DS_Store

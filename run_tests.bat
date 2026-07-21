@@ -1,9 +1,20 @@
 @echo off
-echo === 1. Install dependencies ===
-pip install -r requirements.txt -q
+setlocal
+cd /d %~dp0
 
-echo === 2. Run tests ===
-python -m pytest tests/ -v --tb=short
+if exist .venv\Scripts\python.exe (
+  set PY=.venv\Scripts\python.exe
+) else (
+  set PY=python
+)
 
-echo === Done ===
+echo === Install deps ===
+"%PY%" -m pip install -r requirements.txt -q
+
+echo === CI-compatible full run ===
+call scripts\ci_test.bat full
+set ERR=%ERRORLEVEL%
+
+echo === Done (exit %ERR%) ===
 pause
+exit /b %ERR%

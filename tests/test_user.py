@@ -1,25 +1,33 @@
+"""用户模块：鉴权 + 结构断言。"""
+from __future__ import annotations
+
+import allure
 import pytest
-from core.base_request import BaseRequest
-from core.mock_server import start_mock_server, stop_mock_server
-from core.token_manager import TokenManager
 
-@pytest.fixture(scope="module", autouse=True)
-def mock_server():
-    server, port = start_mock_server()
-    yield port
-    stop_mock_server(server)
+from core.base_request import HttpClient
+from utils.assert_helpers import assert_business, assert_status, attach_response
 
-@pytest.fixture(scope="module")
-def br(mock_server):
-    tm = TokenManager(
-        auth_url=f"http://localhost:{mock_server}/api/login",
-        credentials={"username": "admin", "password": "123456"},
-    )
-    return BaseRequest(base_url=f"http://localhost:{mock_server}", token_manager=tm)
 
-def test_user_profile(br):
-    response = br.request("GET", "/api/user/profile")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["data"]["username"] == "admin"
-    assert data["data"]["role"] == "tester"
+@allure.feature("用户模块")
+@allure.story("个人信息")
+@allure.title("获取用户信息（需鉴权）")
+@allure.severity(allure.severity_level.CRITICAL)
+@pytest.mark.smoke
+def test_user_profile(api_client: HttpClient):
+    response = api_client.get("/api/user/profile", auth=True)
+    attach_response(response)
+    assert_status(response, 200)
+    payload = assert_business(response, expected_code=0, expected_msg_contains="获取成功")
+    data = payload["data"]
+    assert data["username"] == "admin"
+    assert data["role"] == "tester"
+
+
+@allure.feature("用户模块")
+@allure.story("鉴权")
+@allure.title("无 Token 访问用户信息应 401")
+def test_user_profile_unauthorized(raw_client: HttpClient):
+    response = raw_client.get("/api/user/profile", auth=False)
+    attach_response(response)
+    assert_status(response, 401)
+    assert_business(response, expected_code=-1, expected_msg_contains="未授权")

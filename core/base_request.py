@@ -1,42 +1,108 @@
+"""
+HTTP 客户端封装。
+
+设计要点（学这个就够用）：
+1. Session 复用 + Retry
+2. trust_env=False，避免本机代理污染
+3. auth=True/False：鉴权接口与登录/公开接口分流
+4. 便捷 get/post/put/delete
+"""
+from __future__ import annotations
+
+from typing import Any
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
 from core.token_manager import TokenManager
+from utils.logger import get_logger
+
+logger = get_logger("http")
 
 
-class BaseRequest:
-    def __init__(self, base_url: str, token_manager: TokenManager):
+class HttpClient:
+    def __init__(
+        self,
+        base_url: str,
+        token_manager: TokenManager | None = None,
+        timeout: tuple[float, float] = (5, 15),
+        retries: int = 3,
+    ):
         self.base_url = base_url.rstrip("/")
         self.token_manager = token_manager
-        self.session = self._create_session()
+        self.timeout = timeout
+        self.session = self._create_session(retries)
 
-    def _create_session(self) -> requests.Session:
+    def _create_session(self, retries: int) -> requests.Session:
         session = requests.Session()
-        session.trust_env = False  # 跳过系统代理，避免 Clash 等代理干扰
+        session.trust_env = False
+        # 不含 504：业务约定返回的「超时」若进重试，会把 1 次请求变成多次。
         retry = Retry(
-            total=3,
+            total=retries,
             backoff_factor=0.5,
-            status_forcelist=[500, 502, 503, 504],
-            allowed_methods=["GET", "POST", "PUT", "DELETE"],
+            status_forcelist=[500, 502, 503],
+            allowed_methods=frozenset(["GET", "POST", "PUT", "DELETE", "PATCH"]),
+            raise_on_status=False,
         )
         adapter = HTTPAdapter(max_retries=retry)
         session.mount("http://", adapter)
         session.mount("https://", adapter)
-        session.timeout = (5, 15)
         return session
 
-    def _get_headers(self) -> dict:
-        token = self.token_manager.get_token()
-        return {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
+    def _build_headers(self, auth: bool, extra: dict | None) -> dict[str, str]:
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if auth:
+            if self.token_manager is None:
+                raise ValueError("auth=True 但未注入 TokenManager")
+            headers["Authorization"] = f"Bearer {self.token_manager.get_token()}"
+        if extra:
+            headers.update(extra)
+        return headers
 
-    def request(self, method: str, endpoint: str, **kwargs):
+    def request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        auth: bool = True,
+        headers: dict | None = None,
+        timeout: tuple[float, float] | None = None,
+        **kwargs: Any,
+    ) -> requests.Response:
+        """
+        :param auth: True 自动带 Bearer；登录/公开接口请传 False
+        """
+        if not endpoint.startswith("/"):
+            endpoint = "/" + endpoint
         url = f"{self.base_url}{endpoint}"
-        headers = self._get_headers()
-        if "headers" in kwargs:
-            headers.update(kwargs.pop("headers"))
-        if "timeout" not in kwargs:
-            kwargs["timeout"] = self.session.timeout
-        return self.session.request(method, url, headers=headers, **kwargs)
+        final_headers = self._build_headers(auth=auth, extra=headers)
+        final_timeout = timeout or self.timeout
+
+        logger.debug("%s %s auth=%s", method.upper(), url, auth)
+        return self.session.request(
+            method=method.upper(),
+            url=url,
+            headers=final_headers,
+            timeout=final_timeout,
+            **kwargs,
+        )
+
+    def get(self, endpoint: str, **kwargs: Any) -> requests.Response:
+        return self.request("GET", endpoint, **kwargs)
+
+    def post(self, endpoint: str, **kwargs: Any) -> requests.Response:
+        return self.request("POST", endpoint, **kwargs)
+
+    def put(self, endpoint: str, **kwargs: Any) -> requests.Response:
+        return self.request("PUT", endpoint, **kwargs)
+
+    def delete(self, endpoint: str, **kwargs: Any) -> requests.Response:
+        return self.request("DELETE", endpoint, **kwargs)
+
+    def close(self) -> None:
+        self.session.close()
+
+
+# 兼容旧名称
+BaseRequest = HttpClient
