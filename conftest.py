@@ -3,9 +3,15 @@ Pytest 全局 fixture。
 
 分层：
 - settings: 配置
-- mock_server: session 级共享 Mock（整次测试只起一次）
-- api_client: 带 Token 的 HttpClient（指向 Mock）
-- raw_client: 不带 Token 的 HttpClient（登录/公开接口）
+- is_mock_env: dev = Mock模式, test/staging = 真实服务模式
+- mock_db / mock_server: 仅 dev 环境启用
+- base_url: dev→Mock, test/staging→真实服务（jsonplaceholder 等）
+- api_client / raw_client: 统一的 HTTP 客户端
+
+环境切换：
+  $env:TEST_ENV="dev"    → 本地 Mock（默认）
+  $env:TEST_ENV="test"   → jsonplaceholder.typicode.com（公开免费 API）
+  $env:TEST_ENV="staging" → 自定义 BASE_URL 覆盖
 """
 from __future__ import annotations
 
@@ -16,19 +22,22 @@ import pytest
 
 from config.settings import Settings, get_settings
 from core.base_request import HttpClient
+from core.mock_db import MockDB
 from core.mock_server import MockServer, start_mock_server
 from core.token_manager import TokenManager
+from utils.logger import get_logger
 from utils.paths import ALLURE_RESULTS_DIR, PROJECT_ROOT
+
+logger = get_logger("conftest")
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
-    """为 Allure 写入 environment.properties（Jenkins/本地报告里可见环境信息）。"""
     ALLURE_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     settings = get_settings()
     env_file = ALLURE_RESULTS_DIR / "environment.properties"
     lines = [
         f"ENV={settings.env}",
-        f"MockHost={settings.mock_host}",
+        f"BaseURL={settings.base_url}",
         f"PythonPath={sys.executable}",
         f"ProjectRoot={PROJECT_ROOT}",
         f"CI={os.getenv('CI', os.getenv('JENKINS_URL', 'local'))}",
@@ -38,37 +47,76 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def pytest_collection_modifyitems(config, items):
+    """dev 环境跳过 @pytest.mark.real_env，非 dev 环境只跑 @pytest.mark.real_env 或已验证兼容的用例。"""
+    settings = get_settings()
+    if settings.env == "dev":
+        skip_real = pytest.mark.skip(reason="dev 环境不跑真实环境用例（切换到 test 运行）")
+        for item in items:
+            if "real_env" in item.keywords:
+                item.add_marker(skip_real)
+
+
 @pytest.fixture(scope="session")
 def settings() -> Settings:
     return get_settings()
 
 
 @pytest.fixture(scope="session")
-def mock_server(settings: Settings) -> MockServer:
-    """整个测试会话共用一个 Mock，自动分配空闲端口。"""
-    server = start_mock_server(host=settings.mock_host, port=None)
-    yield server
-    server.stop()
+def is_mock_env(settings: Settings) -> bool:
+    return settings.env == "dev"
+
+
+# ── Mock 层（仅 dev 环境） ──
+@pytest.fixture(scope="session")
+def mock_db(is_mock_env: bool) -> MockDB | None:
+    if not is_mock_env:
+        return None
+    return MockDB()
 
 
 @pytest.fixture(scope="session")
-def token_manager(mock_server: MockServer, settings: Settings) -> TokenManager:
+def mock_server(is_mock_env: bool, settings: Settings, mock_db: MockDB | None) -> MockServer | None:
+    if not is_mock_env:
+        logger.info("TEST_ENV=%s → 不启动 Mock，直连 %s", settings.env, settings.base_url)
+        return None
+    server = MockServer(host=settings.mock_host, port=None, db=mock_db)
+    return server.start()
+
+
+# ── URL 层 ──
+@pytest.fixture(scope="session")
+def base_url(is_mock_env: bool, mock_server: MockServer | None, settings: Settings) -> str:
+    return (mock_server and mock_server.base_url) or settings.base_url
+
+
+@pytest.fixture(scope="session")
+def auth_url(is_mock_env: bool, mock_server: MockServer | None, settings: Settings) -> str:
+    return (mock_server and mock_server.auth_url) or settings.auth_url
+
+
+# ── Token（仅 dev 需要登录） ──
+@pytest.fixture(scope="session")
+def token_manager(is_mock_env: bool, auth_url: str, settings: Settings) -> TokenManager | None:
+    if not is_mock_env:
+        # 真实服务（jsonplaceholder）无鉴权，不上 TokenManager
+        return None
     return TokenManager(
-        auth_url=mock_server.auth_url,
+        auth_url=auth_url,
         credentials={"username": settings.username, "password": settings.password},
         timeout=settings.timeout,
     )
 
 
+# ── HTTP 客户端 ──
 @pytest.fixture(scope="session")
 def api_client(
-    mock_server: MockServer,
-    token_manager: TokenManager,
+    base_url: str,
+    token_manager: TokenManager | None,
     settings: Settings,
 ) -> HttpClient:
-    """需要鉴权的接口用这个（默认 auth=True）。"""
     client = HttpClient(
-        base_url=mock_server.base_url,
+        base_url=base_url,
         token_manager=token_manager,
         timeout=settings.timeout,
     )
@@ -77,10 +125,9 @@ def api_client(
 
 
 @pytest.fixture(scope="session")
-def raw_client(mock_server: MockServer, settings: Settings) -> HttpClient:
-    """登录等公开接口用这个（调用时 auth=False）。"""
+def raw_client(base_url: str, settings: Settings) -> HttpClient:
     client = HttpClient(
-        base_url=mock_server.base_url,
+        base_url=base_url,
         token_manager=None,
         timeout=settings.timeout,
     )
@@ -88,7 +135,7 @@ def raw_client(mock_server: MockServer, settings: Settings) -> HttpClient:
     client.close()
 
 
-# 兼容旧 fixture 名
+# ── 兼容旧 fixture 名 ──
 @pytest.fixture(scope="session")
 def config(settings: Settings) -> Settings:
     return settings

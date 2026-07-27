@@ -77,14 +77,26 @@ def read_test_cases(file_path: str | Path | None = None) -> list[dict[str, Any]]
             raise ValueError(f"第 {int(idx) + 2} 行缺少必填字段 (name/endpoint/method/status)")
 
         code_raw = _cell_str(row.get("expected_code"))
+        try:
+            expected_status = int(status_raw)
+        except ValueError as e:
+            raise ValueError(
+                f"第 {int(idx) + 2} 行 expected_status 不是合法数字: {status_raw!r}"
+            ) from e
+        try:
+            expected_code = int(code_raw) if code_raw is not None else None
+        except ValueError as e:
+            raise ValueError(
+                f"第 {int(idx) + 2} 行 expected_code 不是合法数字: {code_raw!r}"
+            ) from e
         cases.append(
             {
                 "name": name,
                 "endpoint": endpoint,
                 "method": method.upper(),
                 "body": _parse_body(row.get("body")),
-                "expected_status": int(status_raw),
-                "expected_code": int(code_raw) if code_raw is not None else None,
+                "expected_status": expected_status,
+                "expected_code": expected_code,
                 "expected_msg": _cell_str(row.get("expected_msg")),
             }
         )
@@ -97,7 +109,12 @@ def filter_cases(
     endpoints: set[str] | None = None,
     file_path: str | Path | None = None,
 ) -> list[dict[str, Any]]:
-    """按 endpoint 过滤用例。"""
+    """按 endpoint 过滤用例。endpoints 必须是 set[str] 而非单个字符串。"""
+    if endpoints is not None and not isinstance(endpoints, set):
+        raise TypeError(
+            f"filter_cases 的 endpoints 参数必须为 set，收到 {type(endpoints).__name__}: {endpoints!r}\n"
+            "例如: filter_cases(endpoints={'/api/login'}) — 注意是大括号不是不带括号的字符串"
+        )
     data = cases if cases is not None else read_test_cases(file_path)
     if endpoints is None:
         return data

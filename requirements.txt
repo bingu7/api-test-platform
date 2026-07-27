@@ -10,3 +10,9 @@ openpyxl>=3.1.2,<4
 
 # local mock
 flask>=3.0.0,<4
+
+# json schema validation
+jsonschema>=4.20,<5
+
+# concurrent / xdist
+pytest-xdist>=3.5,<4

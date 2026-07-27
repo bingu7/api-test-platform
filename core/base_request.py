@@ -51,42 +51,57 @@ class HttpClient:
         return session
 
     def _build_headers(self, auth: bool, extra: dict | None) -> dict[str, str]:
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        if auth:
-            if self.token_manager is None:
-                raise ValueError("auth=True 但未注入 TokenManager")
-            headers["Authorization"] = f"Bearer {self.token_manager.get_token()}"
-        if extra:
-            headers.update(extra)
-        return headers
+            headers: dict[str, str] = {"Content-Type": "application/json"}
+            if auth and self.token_manager is not None:
+                headers["Authorization"] = f"Bearer {self.token_manager.get_token()}"
+            if extra:
+                headers.update(extra)
+            return headers
 
     def request(
-        self,
-        method: str,
-        endpoint: str,
-        *,
-        auth: bool = True,
-        headers: dict | None = None,
-        timeout: tuple[float, float] | None = None,
-        **kwargs: Any,
-    ) -> requests.Response:
-        """
-        :param auth: True 自动带 Bearer；登录/公开接口请传 False
-        """
-        if not endpoint.startswith("/"):
-            endpoint = "/" + endpoint
-        url = f"{self.base_url}{endpoint}"
-        final_headers = self._build_headers(auth=auth, extra=headers)
-        final_timeout = timeout or self.timeout
+            self,
+            method: str,
+            endpoint: str,
+            *,
+            auth: bool = True,
+            headers: dict | None = None,
+            timeout: tuple[float, float] | None = None,
+            **kwargs: Any,
+        ) -> requests.Response:
+            """
+            要求 auth=True 自动带 Bearer；登录/公开接口请传 False。
+            当 auth=True 且收到 401 时，自动 invalidate token 并重试一次（防死循环）。
+            """
+            if not endpoint.startswith("/"):
+                endpoint = "/" + endpoint
+            url = f"{self.base_url}{endpoint}"
+            final_headers = self._build_headers(auth=auth, extra=headers)
+            final_timeout = timeout or self.timeout
 
-        logger.debug("%s %s auth=%s", method.upper(), url, auth)
-        return self.session.request(
-            method=method.upper(),
-            url=url,
-            headers=final_headers,
-            timeout=final_timeout,
-            **kwargs,
-        )
+            logger.debug("%s %s auth=%s", method.upper(), url, auth)
+
+            response = self.session.request(
+                method=method.upper(),
+                url=url,
+                headers=final_headers,
+                timeout=final_timeout,
+                **kwargs,
+            )
+
+            # 401 自动重登（仅当需要鉴权且 TokenManager 可用时）
+            if auth and response.status_code == 401 and self.token_manager is not None:
+                logger.info("收到 401，尝试刷新 token 并重试")
+                self.token_manager.invalidate()
+                retry_headers = self._build_headers(auth=True, extra=headers)
+                response = self.session.request(
+                    method=method.upper(),
+                    url=url,
+                    headers=retry_headers,
+                    timeout=final_timeout,
+                    **kwargs,
+                )
+
+            return response
 
     def get(self, endpoint: str, **kwargs: Any) -> requests.Response:
         return self.request("GET", endpoint, **kwargs)

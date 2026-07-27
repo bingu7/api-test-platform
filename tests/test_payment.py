@@ -5,6 +5,7 @@ import allure
 import pytest
 
 from core.base_request import HttpClient
+from core.mock_db import MockDB
 from utils.assert_helpers import assert_business, assert_status, attach_response
 
 
@@ -14,12 +15,32 @@ class TestPaymentMock:
     @allure.severity(allure.severity_level.BLOCKER)
     @pytest.mark.smoke
     def test_payment_success(self, raw_client: HttpClient):
+        """支付成功 + 数据库状态校验。"""
         response = raw_client.post("/api/payment/status", auth=False)
         attach_response(response)
         assert_status(response, 200)
         payload = assert_business(response, expected_code=0)
         assert payload["data"]["status"] == "paid"
-        assert payload["data"]["order_id"].startswith("MOCK_")
+        assert payload["data"]["order_id"].startswith("ORD_")
+
+    @allure.story("支付成功 + 数据库校验")
+    def test_payment_with_db_check(self, raw_client: HttpClient, mock_db: MockDB):
+        """支付接口返回 200 不算数——必须校验数据库状态。"""
+        order_id = "ORD_DB_00002"  # 种子数据：pending
+        assert mock_db.get_order(order_id)["status"] == "pending"
+
+        response = raw_client.post(
+            "/api/payment/status",
+            auth=False,
+            json={"order_id": order_id, "status": "paid"},
+        )
+        attach_response(response)
+        assert_status(response, 200)
+        payload = assert_business(response, expected_code=0)
+        assert payload["data"]["status"] == "paid"
+
+        # 核心：接口返回 paid → 数据库也必须是 paid
+        assert mock_db.get_order(order_id)["status"] == "paid"
 
     @allure.story("支付超时")
     def test_payment_timeout(self, raw_client: HttpClient):

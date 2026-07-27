@@ -49,10 +49,10 @@ _DEFAULTS: dict[str, dict] = {
         "password": "123456",
     },
     "test": {
-        "base_url": "http://test.example.com:8080",
-        "auth_url": "http://test.example.com:8080/auth/login",
-        "username": "test_user",
-        "password": "test_pass",
+        "base_url": "https://jsonplaceholder.typicode.com",
+        "auth_url": "https://jsonplaceholder.typicode.com/posts",  # 无真实 auth，用 posts 代替
+        "username": "",   # JSONPlaceholder 无鉴权
+        "password": "",   # JSONPlaceholder 无鉴权
     },
     "staging": {
         "base_url": "https://staging.example.com",

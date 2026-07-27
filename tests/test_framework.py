@@ -15,6 +15,7 @@ def test_project_paths():
     assert data_file("test_cases.xlsx").is_file()
 
 
+@pytest.mark.smoke
 def test_read_excel_default_path():
     cases = read_test_cases()
     assert len(cases) >= 5
@@ -22,6 +23,7 @@ def test_read_excel_default_path():
     assert "正常登录" in names
 
 
+@pytest.mark.smoke
 def test_filter_login_cases():
     login = filter_cases(endpoints={"/api/login"})
     assert all(c["endpoint"] == "/api/login" for c in login)
@@ -33,6 +35,7 @@ def test_settings_unknown_env():
         get_settings("no-such-env")
 
 
+@pytest.mark.smoke
 def test_settings_default_api_user_is_admin():
     """回归：勿读取 Windows 系统 USERNAME 导致账号变成当前系统用户。"""
     s = get_settings("dev")
@@ -40,6 +43,7 @@ def test_settings_default_api_user_is_admin():
     assert s.password == "123456"
 
 
+@pytest.mark.smoke
 def test_token_error_on_bad_password(mock_server, settings):
     tm = TokenManager(
         auth_url=mock_server.auth_url,
