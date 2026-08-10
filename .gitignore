@@ -28,6 +28,7 @@ htmlcov/
 .agents/
 .hermes/
 .deepeval/
+.serena/
 IDEA.md
 skills-lock.json
 

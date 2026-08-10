@@ -80,7 +80,7 @@ def mock_server(is_mock_env: bool, settings: Settings, mock_db: MockDB | None) -
     if not is_mock_env:
         logger.info("TEST_ENV=%s → 不启动 Mock，直连 %s", settings.env, settings.base_url)
         return None
-    server = MockServer(host=settings.mock_host, port=None, db=mock_db)
+    server = MockServer(host=settings.mock_host, port=None, db=mock_db, login_rate_limit=0)
     return server.start()
 
 

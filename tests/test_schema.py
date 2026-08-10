@@ -33,7 +33,7 @@ def test_login_schema(raw_client: HttpClient):
     assert_status(response, 200)
     payload = validate_response(response, SCHEMA_LOGIN_SUCCESS, "登录成功")
     # 额外断言：Schema 已校验类型，这里只需校验值
-    assert payload["access_token"] == "MOCK_TOKEN"
+    assert len(payload["access_token"]) >= 32  # 动态 token（F-04 修复后不再固定）
     assert payload["expires_in"] > 0
 
 

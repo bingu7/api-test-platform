@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import json
+
 import allure
 from jsonschema import validate, ValidationError
 from requests import Response

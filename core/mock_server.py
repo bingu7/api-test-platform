@@ -21,6 +21,12 @@ from utils.logger import get_logger
 
 logger = get_logger("mock")
 
+# ── 安全加固常量（pentest 修复） ──
+LOGIN_RATE_LIMIT = 5          # 同一 IP 60s 窗口内允许的登录尝试次数（F-01）
+LOGIN_RATE_WINDOW = 60        # 秒
+MAX_AMOUNT = 1_000_000.0      # 单笔订单金额上限（F-05）
+_LOGIN_ATTEMPTS: dict[str, list[float]] = {}  # ip -> [尝试时间戳]
+
 
 def _pick_free_port(host: str = "127.0.0.1") -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -29,7 +35,27 @@ def _pick_free_port(host: str = "127.0.0.1") -> int:
         return sock.getsockname()[1]
 
 
-def create_app(db: MockDB | None = None) -> Flask:
+def _check_login_rate_limit(ip: str) -> bool:
+    """滑动窗口限流：窗口内尝试超限返回 True（F-01）。"""
+    now = time.time()
+    attempts = _LOGIN_ATTEMPTS.setdefault(ip, [])
+    # 清理窗口外的旧记录
+    _LOGIN_ATTEMPTS[ip] = [t for t in attempts if now - t < LOGIN_RATE_WINDOW]
+    if len(_LOGIN_ATTEMPTS[ip]) >= LOGIN_RATE_LIMIT:
+        return True
+    _LOGIN_ATTEMPTS[ip].append(now)
+    return False
+
+
+def _current_user(db: MockDB) -> str | None:
+    """从 Authorization: Bearer <token> 解析当前用户名（F-04 动态 token）。"""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    return db.resolve_token(auth[7:].strip())
+
+
+def create_app(db: MockDB | None = None, login_rate_limit: int = LOGIN_RATE_LIMIT) -> Flask:
     app = Flask("api-test-mock")
     _db = db or MockDB()
 
@@ -57,22 +83,22 @@ def create_app(db: MockDB | None = None) -> Flask:
     # ── 用户 ──
     @app.route("/api/user/profile", methods=["GET"])
     def mock_user_profile():
-        auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
+        username = _current_user(_db)
+        if username is None:
             return jsonify({"code": -1, "message": "未授权"}), 401
         return jsonify(
             {
                 "code": 0,
                 "message": "获取成功",
-                "data": {"username": "admin", "role": "tester"},
+                "data": {"username": username, "role": "tester"},
             }
         )
 
     # ── 订单 ──
     @app.route("/api/orders", methods=["GET"])
     def mock_orders():
-        auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
+        username = _current_user(_db)
+        if username is None:
             return jsonify({"code": -1, "message": "未授权"}), 401
         orders = _db.list_orders()
         return jsonify(
@@ -85,12 +111,23 @@ def create_app(db: MockDB | None = None) -> Flask:
 
     @app.route("/api/orders", methods=["POST"])
     def mock_create_order():
+        # F-03: 创建订单需要登录，绑定 owner
+        username = _current_user(_db)
+        if username is None:
+            return jsonify({"code": -1, "message": "未授权"}), 401
+
         body = request.get_json(silent=True) or {}
         order_id = body.get("order_id", f"ORD_{int(time.time() * 1000)}")
-        amount = float(body.get("amount", 0))
+        # F-05: 金额必须为数字且落在 (0, MAX_AMOUNT]
+        try:
+            amount = float(body.get("amount", 0))
+        except (TypeError, ValueError):
+            return jsonify({"code": -1, "message": "金额必须是数字"}), 400
         if amount <= 0:
             return jsonify({"code": -1, "message": "金额必须大于 0"}), 400
-        order = _db.create_order(order_id, amount)
+        if amount > MAX_AMOUNT:
+            return jsonify({"code": -1, "message": f"金额不能超过 {int(MAX_AMOUNT)}"}), 400
+        order = _db.create_order(order_id, amount, owner=username)
         return jsonify(
             {
                 "code": 0,
@@ -101,11 +138,18 @@ def create_app(db: MockDB | None = None) -> Flask:
 
     @app.route("/api/orders/<order_id>/status", methods=["PUT"])
     def mock_update_order_status(order_id: str):
+        # F-03: 只能改自己的订单
+        username = _current_user(_db)
+        if username is None:
+            return jsonify({"code": -1, "message": "未授权"}), 401
         body = request.get_json(silent=True) or {}
         status = body.get("status", "")
-        order = _db.update_payment(order_id, status)
+        order = _db.get_order(order_id)
         if order is None:
             return jsonify({"code": -1, "message": f"订单 {order_id} 不存在"}), 404
+        if order["owner"] != username:
+            return jsonify({"code": -1, "message": "无权操作该订单"}), 403
+        order = _db.update_payment(order_id, status)
         return jsonify(
             {
                 "code": 0,
@@ -116,12 +160,15 @@ def create_app(db: MockDB | None = None) -> Flask:
 
     @app.route("/api/orders/<order_id>", methods=["GET"])
     def mock_get_order(order_id: str):
-        auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
+        # F-03: 只能看自己的订单
+        username = _current_user(_db)
+        if username is None:
             return jsonify({"code": -1, "message": "未授权"}), 401
         order = _db.get_order(order_id)
         if order is None:
             return jsonify({"code": -1, "message": f"订单 {order_id} 不存在"}), 404
+        if order["owner"] != username:
+            return jsonify({"code": -1, "message": "无权访问该订单"}), 403
         return jsonify(
             {
                 "code": 0,
@@ -163,22 +210,28 @@ def create_app(db: MockDB | None = None) -> Flask:
     # ── 登录 ──
     @app.route("/api/login", methods=["POST"])
     def mock_login():
+        # F-01: 限流（按 IP 滑动窗口；login_rate_limit=0 表示关闭，测试环境用）
+        if login_rate_limit > 0 and _check_login_rate_limit(request.remote_addr or "unknown"):
+            return jsonify({"code": -1, "message": "尝试过于频繁，请稍后再试"}), 429
+
         data = request.get_json(silent=True) or {}
         username = data.get("username")
         password = data.get("password")
 
-        if username == "admin" and password == "123456":
-            return jsonify(
-                {
-                    "code": 0,
-                    "message": "登录成功",
-                    "access_token": "MOCK_TOKEN",
-                    "expires_in": 3600,
-                }
-            )
-        if username == "admin":
-            return jsonify({"code": -1, "message": "密码错误"}), 401
-        return jsonify({"code": -1, "message": "用户未找到"}), 404
+        # F-02: 统一失败响应，不泄露用户是否存在（消除用户枚举）
+        if username != "admin" or password != "123456":
+            return jsonify({"code": -1, "message": "用户名或密码错误"}), 401
+
+        # F-04: 动态 token，不再使用固定 MOCK_TOKEN
+        token = _db.issue_token("admin")
+        return jsonify(
+            {
+                "code": 0,
+                "message": "登录成功",
+                "access_token": token,
+                "expires_in": 3600,
+            }
+        )
 
     @app.errorhandler(404)
     def handle_not_found(_e: Any):
@@ -194,13 +247,14 @@ def create_app(db: MockDB | None = None) -> Flask:
 class MockServer:
     """可 start/stop 的 Mock 服务句柄。"""
 
-    def __init__(self, host: str = "127.0.0.1", port: int | None = None, db: MockDB | None = None):
+    def __init__(self, host: str = "127.0.0.1", port: int | None = None, db: MockDB | None = None,
+                 login_rate_limit: int = LOGIN_RATE_LIMIT):
         self.host = host
         self.port = port if port is not None else _pick_free_port(host)
         self.db = db or MockDB()
         self._server = None
         self._thread: threading.Thread | None = None
-        self.app = create_app(db=self.db)
+        self.app = create_app(db=self.db, login_rate_limit=login_rate_limit)
 
     @property
     def base_url(self) -> str:
@@ -241,8 +295,9 @@ class MockServer:
         logger.info("Mock 已停止: %s", self.base_url)
 
 
-def start_mock_server(host: str = "127.0.0.1", port: int | None = None) -> MockServer:
-    return MockServer(host=host, port=port).start()
+def start_mock_server(host: str = "127.0.0.1", port: int | None = None,
+                      login_rate_limit: int = LOGIN_RATE_LIMIT) -> MockServer:
+    return MockServer(host=host, port=port, login_rate_limit=login_rate_limit).start()
 
 
 def stop_mock_server(server: MockServer) -> None:
