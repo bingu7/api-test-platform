@@ -116,7 +116,7 @@ $env:BASE_URL="https://your-api.com"
 python -m pytest tests/ -v
 ```
 
-> dev 环境下 @pytest.mark.real_env 的用例自动 skip。
+> dev 环境下 @pytest.mark.real_env 的用例自动 skip；非 dev 环境下 Mock 业务用例自动 skip（环境感知过滤，避免用例误跑）。
 
 ---
 

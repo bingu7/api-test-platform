@@ -48,13 +48,18 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 
 
 def pytest_collection_modifyitems(config, items):
-    """dev 环境跳过 @pytest.mark.real_env，非 dev 环境只跑 @pytest.mark.real_env 或已验证兼容的用例。"""
+    """环境过滤：dev 只跑 Mock 业务用例（跳过 real_env）；非 dev 只跑 real_env 用例。"""
     settings = get_settings()
     if settings.env == "dev":
         skip_real = pytest.mark.skip(reason="dev 环境不跑真实环境用例（切换到 test 运行）")
         for item in items:
             if "real_env" in item.keywords:
                 item.add_marker(skip_real)
+    else:
+        skip_mock = pytest.mark.skip(reason="非 Mock 环境不跑业务用例（切换到 dev 运行）")
+        for item in items:
+            if "real_env" not in item.keywords:
+                item.add_marker(skip_mock)
 
 
 @pytest.fixture(scope="session")
