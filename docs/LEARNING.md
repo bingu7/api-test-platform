@@ -1,214 +1,242 @@
 # 学习路径：如何用这个仓库学接口自动化
 
-目标：不是「会点运行 demo」，而是能说清每一层为什么这样设计，并能自己加一条新接口用例。
+目标：不是「会点运行 demo」，而是能说清每一层为什么这样设计，并能自给自足地给一个新 REST 后端写一套完整接口自动化。
 
-建议总时长：3～5 个晚上。每天只做一节 + 一个小实验。
+建议总时长：**10 个晚上**，每天只做一节 + 一个小实验。完整阅读由此顺序：`README → ARCHITECTURE（主读）→ 本文 → BACKEND → FLOW → JENKINS`。
 
 ---
 
-## 第 0 天：跑通
+## 第 0 天：两个环境都跑通
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
+# 装依赖
 pip install -r requirements.txt
+pip install -r apps/backend/requirements.txt
+
+# dev（Flask Mock，零外网）
 python -m pytest tests/ -v
-python -m pytest tests/ -m smoke -v
+# real（FastAPI 后端，自动起 + 全维度）
+TEST_ENV=real python -m pytest tests/ -v
 ```
 
 观察：
 
-- 总耗时是否在数秒内（若又回到 30s+，检查是否又写了 `localhost`）
-- `test_framework` 是否通过（路径/Excel/TokenError）
+- dev 在数秒内跑完；real 多花几秒（起后端 + 接口真打）
+- 各跑了几条用例，看状态码色块分布
 
 ---
 
 ## 第 1 天：配置与路径（`config/` + `utils/paths.py`）
 
-**读**
+**读**：`config/settings.py`、`utils/paths.py`
 
-1. `config/settings.py` — `Settings` 数据类、环境默认值、环境变量覆盖  
-2. `utils/paths.py` — 为什么用 `PROJECT_ROOT` 而不是 `data/xxx.xlsx` 相对路径  
-
-**实验**
-
-```bash
-# PowerShell —— 切记用 API_USERNAME，不要用 USERNAME（Windows 系统变量）
+**实验**：
+```powershell
 $env:API_USERNAME="admin"
 $env:API_PASSWORD="wrong"
-python -m pytest tests/test_framework.py::test_token_error_on_bad_password -v
-Remove-Item Env:API_PASSWORD
+python -m pytest tests/test_framework.py -v
 ```
+观察：为什么不会污染——Windows 的 `USERNAME` 系统变量会怎样。
 
-**自问**
-
-- `get_settings("no-such-env")` 为什么要抛错而不是静默用 dev？
-- 为什么配置键叫 `API_USERNAME` 而不是 `USERNAME`？（提示：Windows 已占用）
-- 若在 `tests/` 目录下执行 pytest，相对路径会怎样？绝对路径呢？
+**自问**：
+- `get_settings("no-such-env")` 为什么抛错而不是静默用 dev？
+- 为什么是 `API_USERNAME` 而不是 `USERNAME`？
 
 ---
 
 ## 第 2 天：HttpClient 与 Token（`core/base_request.py` + `token_manager.py`）
 
-**读**
+**读**：HTTP 客户端的 Session/Retry/auth 设计；TokenManager 缓存与提前过期。
 
-1. `HttpClient.request(..., auth=True/False)`  
-2. `TokenManager.get_token` 缓存与提前 60s 过期  
-3. `TokenError` 与裸 `KeyError` 的差别  
-
-**实验**
-
-在 `tests/` 临时写一个用例（学完可删）：
-
+**实验**：在 `tests/` 临时写：
 ```python
-def test_auth_flag(api_client, raw_client):
-    # 无 token 应 401
-    r1 = raw_client.get("/api/user/profile", auth=False)
-    assert r1.status_code == 401
-    # 有 token 应 200
-    r2 = api_client.get("/api/user/profile", auth=True)
-    assert r2.status_code == 200
+def test_auth(raw_client, api_client):
+    assert raw_client.get("/api/user/profile", auth=False).status_code == 401  # dev
+    assert api_client.get("/api/user/profile", auth=True).status_code == 200
 ```
 
-**自问**
-
-- 为什么登录负向用例不能用默认 `auth=True`？
-- Retry 为什么只对 5xx，不对 401？
+**自问**：登录负向用例为什么不能用 `auth=True`？Retry 为什么不含 401？
 
 ---
 
-## 第 3 天：Mock 与 Fixture（`core/mock_server.py` + `conftest.py`）
+## 第 3 天：真实后端怎么写（`apps/backend/`）—— 关键一天
 
-**读**
+**读**：`main.py`（lifespan）/ `models.py`（ORM）/ `schemas.py`（Pydantic）/ `auth.py`（PBKDF2+JWT）/ `routers/`。
 
-1. `MockServer`：随机端口、就绪探测、`base_url`/`auth_url`  
-2. session 级 `mock_server` / `api_client` / `raw_client`  
-
-**实验**
-
-- 把 `mock_server` fixture 的 `scope` 改成 `function` 再跑全量，感受启动次数与耗时变化，然后改回 `session`。  
-- 阅读 `/api/user/profile` 的 Bearer 校验逻辑。
-
-**自问**
-
-- 多个测试文件各自 `start_mock_server(5000)` 有什么问题？
-- `port=0` / 系统分配端口解决了什么？
-
----
-
-## 第 4 天：数据驱动与断言（`utils/excel_reader.py` + `assert_helpers.py` + Excel）
-
-**读**
-
-1. Excel 列约定与 `REQUIRED_COLUMNS`  
-2. `filter_cases(endpoints=...)`  
-3. `assert_case_response`  
-
-**实验**
-
-在 `data/test_cases.xlsx` 增加一行登录用例（例如错误用户名），再跑：
-
+**实验**：
 ```bash
-python -m pytest tests/test_login.py -v
+make backend
+# 浏览器开 http://127.0.0.1:8000/docs，点 Authorize 试调 /api/orders
 ```
 
-**自问**
+**自问**：
+- IDOR 防护写在哪一行？为什么 `order.user_id != user.id` 就能防越权？
+- 422 是 Pydantic 在哪一层拦下的？
+- 幂等键为什么能防重复扣款？
 
+---
+
+## 第 4 天：接口封装层 PO 模式（`apis/`）
+
+**读**：`apis/auth_api.py` / `order_api.py` —— 每个方法只封装「怎么调」。
+
+**实验**：写一个新接口封装方法——比如 `OrderAPI.list_by_status`，再写测试调它。
+
+**自问**：
+- 把 PO 想成「service 层」，与「测试里直接 POST URL」相比，未来接口改路径谁省事？
+- 为什么不把断言写进 PO？
+
+---
+
+## 第 5 天：数据驱动与断言（`utils/excel_reader.py` + `assert_helpers.py` + `data/builders.py`）
+
+**读**：Excel 列约定；`filter_cases`；`assert_json_path` / `assert_response_time`；Builder 链式造数据。
+
+**实验**：
+- 在 `data/backend_cases.xlsx` 加一行用例（重复用户名注册）
+- 用 `UserData().with_password("1").build()` 写一个 422 用例
+
+**自问**：
 - 业务 code 与 HTTP status 为什么都要断言？
-- 订单用例里对 `orders[0].keys()` 的结构断言解决了什么假绿问题？
+- Builder 与随机 Factory 各自适合什么场景？
 
 ---
 
-## 第 5 天：自己加一条「新接口」
+## 第 6 天：Mock 与 fixture（`core/mock_server.py` + `conftest.py`）
 
-按正规流程扩展（不要只在一个文件里堆逻辑）：
+**读**：session 级 `mock_server` / `backend_server` fixture；环境 marker 怎么分发用例。
 
-1. **Mock**：在 `core/mock_server.py` 增加 `GET /api/health` → `{"code":0,"message":"ok"}`  
-2. **用例**：`tests/test_health.py` 用 `raw_client` 断言 200 + code  
-3. **（可选）Excel**：加一行数据驱动  
-4. **标记**：给主路径加 `@pytest.mark.smoke`  
-5. **报告**：
+**实验**：把 `mock_server` fixture 的 `scope` 改成 `function` 跑一次——感受耗时差异。
 
-```bash
-python -m pytest tests/ --alluredir=allure-results
-allure serve allure-results
-```
+**自问**：
+- 为什么 conftest 自动起后端，而不是 Jenkins 配置里起？
+- `pytest_collection_modifyitems` 怎么做到「dev 不跑后端、real 不跑 Mock」？
+
+---
+
+## 第 7 天：DB 落库白盒校验（`utils/db_helper.py` + `tests/test_db_verification.py`）
+
+**读**：直连 SQLite 做只读断言；API 返回 + DB 状态双校验。
+
+**实验**：写一个 `test_refund_then_db`——调退款然后 `db_helper.assert_payment_status(refunded)`。
+
+**自问**：
+- 为什么 HTTP 200 不代表数据真的落库？
+- 双校验里哪一项更可信？
+
+---
+
+## 第 8 天：安全 / 性能 / 契约测试（多维）
+
+**读**：
+- `tests/test_security.py`——IDOR / 越权 / SQL注入 / 泄露 / 鉴权
+- `tests/test_performance.py` + `scripts/perf_test.py`——P95 / QPS
+- `tests/test_contract.py`——OpenAPI 契约
+
+**实验**：
+- 故意把后端某行 `order.user_id != user.id` 校验去掉，跑 `test_security.py` 看哪条挂
+- 改 `perf_test.py` 的 `-n`、`-c` 看响应如何随并发变化
+- 在 `/openapi.json` 里找一个端点，看响应结构是否和契约对得上
+
+**自问**：
+- 接口测试里，「安不安全」和「正不正常」是同一回事吗？
+- 契约漂移和业务功能性 fail 区别在哪？
+
+---
+
+## 第 9 天：自己加一个完整的新接口（端到端演练）
+
+按正规流程加一条「商品搜索」接口，从头到尾都碰一遍：
+
+1. 后端：`routers/products.py` 加 `GET /api/products/search?q=...`
+2. PO：`apis/product_api.py` 加 `search(q)` 方法
+3. 数据：`data/builders.py` 加 `ProductData.with_name`
+4. 测试：
+   - `test_product_api.py` 正向 + 测权限边界
+   - `test_contract.py` 拉新端点的 OpenAPI 校验
+   - `test_performance.py` 给它加个基准断言（> 200ms 算失败）
+5. 标 marker：`backend` + `smoke`
+6. 跑：`TEST_ENV=real pytest -m smoke`
 
 做完后你应能向面试官讲清：
 
-> 配置 → 客户端 → Token → Mock/真实服务 → Fixture 注入 → 数据驱动 → 断言 → 报告
+> 配置 → 客户端 → 后端 → PO → 数据 → DB校验 → 断言 → 报告 → CI 全链路
 
 ---
 
-## 推荐阅读顺序（文件）
+## 第 10 天：CI / Jenkins / 完整交付
+
+**读**：[FLOW.md](./FLOW.md) / [JENKINS.md](./JENKINS.md) / 根 `Jenkinsfile` / `.github/workflows/api-tests.yml` / `scripts/ci_test.*`。
+
+**实验**：
+```bash
+scripts/ci_test.bat full           # dev
+TEST_ENV=real scripts/ci_test.sh full   # real
+dir reports
+dir allure-results
+allure serve allure-results        # 看可视化报告
+```
+
+**自问**：
+- 为什么 CI 不在 Jenkinsfile 里直接写长 pytest，而是抽到 `scripts/`？
+- smoke vs full 在什么门禁各适合？
+- matrix 跑两 env 的成本与价值？
+
+---
+
+## 推荐阅读顺序（源文件）
 
 ```
 README.md
-docs/LEARNING.md          ← 你在这里
+docs/ARCHITECTURE.md          ← 你在这里上面的
+docs/LEARNING.md              ← 本文
+docs/BACKEND.md
 config/settings.py
-utils/paths.py
-utils/logger.py
+utils/paths.py  utils/logger.py
 core/token_manager.py
 core/base_request.py
+apps/backend/main.py  models.py  schemas.py  deps.py  routers/
 core/mock_server.py
+core/backend_server.py
 conftest.py
-utils/excel_reader.py
-utils/assert_helpers.py
-tests/test_login.py
-tests/test_user.py
-tests/test_orders.py
-tests/test_payment.py
-tests/test_framework.py
+apis/auth_api.py  order_api.py
+data/builders.py  factories.py
+utils/assert_helpers.py  db_helper.py  schema_validator.py
+tests/test_auth_api.py  test_order_api.py  test_payment_api.py
+tests/test_db_verification.py  test_security.py  test_performance.py  test_contract.py
 ```
 
 ---
 
-## 反模式清单（项目里已避免，学习时别加回去）
+## 反模式清单（项目里已避免，别加回去）
 
 | 反模式 | 正规做法 |
-|--------|----------|
+|--------|---------|
 | 登录测试强制带 Bearer | `auth=False` / `raw_client` |
-| 每文件起一个 Mock 固定 5000 端口 | session 级 + 随机端口 |
+| 每文件起一个 Mock 固定端口 | session 级 + 随机端口 |
 | `localhost` | `127.0.0.1` |
 | Excel 相对 cwd | `data_file()` / 绝对路径 |
 | Token 失败 `KeyError` | `TokenError` + 状态码/body |
-| 全局 404 文案写成「用户未找到」 | 业务 404 vs 路由 404 分开 |
-| README 写 Jenkins/邮件却没代码 | 仓库已提供 `Jenkinsfile` + `NOTIFY_EMAIL` 钩子，按文档配置即可 |
-| 本机一套命令、CI 另一套 | 统一 `scripts/ci_test.sh|.bat` |
+| 测试里直接写 URL / body | `apis/` PO 封装 |
+| 只断言 HTTP 200 | 加 DB 白盒 (db_helper) |
+| 每次跑用例用固定账号 | `factories.fake_*()` 随机 |
+| 测接口不测安全 | `test_security.py` 越权/注入/泄露 |
+| 本机一套命令、CI 另一套 | 统一 `scripts/ci_test.*` |
+| 把后端进程依赖 Jenkins 配 | conftest fixture 自动起 |
 
 ---
 
-## 第 6 天：CI / Jenkins / 完整交付（扩展）
+## 学完后能向面试官讲清
 
-**读**
+| 问题 | 指哪 |
+|------|------|
+| 接口之间怎么串联 | `test_workflow.py`、`test_auth_api.py::test_login_then_me` |
+| 怎么保证数据真的落库 | `test_db_verification.py` |
+| 接口安全怎么测 | `test_security.py` |
+| 性能怎么测 | `test_performance.py` + `perf_test.py` |
+| 契约怎么不漂 | `test_contract.py` |
+| 接口怎么封装 | `apis/` PO 模式 |
+| 多环境怎么切 | `TEST_ENV` + conftest |
+| CI 怎么交付 | `Jenkinsfile` + `scripts/ci_test.*` |
 
-1. [FLOW.md](./FLOW.md) — 端到端流程图  
-2. [JENKINS.md](./JENKINS.md) — 建任务与插件  
-3. 根目录 `Jenkinsfile`、`scripts/ci_test.*`  
-
-**实验**
-
-```bat
-scripts\ci_test.bat smoke
-dir reports
-dir allure-results
-```
-
-确认生成 `reports\junit.xml` 与 `allure-results\`。有 Allure CLI 时：`allure serve allure-results`。
-
-**自问**
-
-- 为什么 CI 不直接写一长串 `pytest` 在 Jenkinsfile 里，而要抽到 `scripts/`？
-- smoke 与 full 分别适合什么门禁？
-
----
-
-## 学完后可继续的方向
-
-1. 对接真实测试环境（环境变量切换，mock 仅 dev 启用）  
-2. JSON Schema 校验（`jsonschema`）  
-3. 接口依赖：下单 → 查询订单号串联  
-4. Allure 分类更细：`allure.epic` / 链接缺陷系统  
-5. Jenkins 共享库 / 多分支 Pipeline  
-
-每次只加一层，跑绿再提交。
+每问只答一文件 —— 这是「能讲清每一层为什么」的具体落地。

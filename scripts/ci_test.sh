@@ -47,6 +47,10 @@ fi
 echo "==> venv python: $($PYTHON --version 2>&1)"
 "$PYTHON" -m pip install -U pip -q
 "$PYTHON" -m pip install -r requirements.txt -q
+# 后端被测系统依赖（real 环境需要：conftest 的 backend_server fixture 会用子进程起 uvicorn）
+if [[ -f apps/backend/requirements.txt ]]; then
+  "$PYTHON" -m pip install -r apps/backend/requirements.txt -q
+fi
 
 # 清空产物，但保留目录内的 .gitignore
 mkdir -p allure-results reports

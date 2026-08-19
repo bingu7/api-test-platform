@@ -1,4 +1,4 @@
-"""接口依赖 / 业务链路测试。
+"""接口依赖 / 业务链路测试。（Mock 专属）
 
 面试必问：「接口之间怎么串联？」
 回答：「用 pytest fixture 链 + 共享 session，模拟真实用户路径——
@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import allure
 import pytest
+
+pytestmark = pytest.mark.mock_only
 
 from core.base_request import HttpClient
 from core.mock_db import MockDB

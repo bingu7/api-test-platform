@@ -115,6 +115,9 @@ class HttpClient:
     def delete(self, endpoint: str, **kwargs: Any) -> requests.Response:
         return self.request("DELETE", endpoint, **kwargs)
 
+    def patch(self, endpoint: str, **kwargs: Any) -> requests.Response:
+        return self.request("PATCH", endpoint, **kwargs)
+
     def close(self) -> None:
         self.session.close()
 

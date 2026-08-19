@@ -1,4 +1,4 @@
-"""并发 / 性能用例。
+"""并发 / 性能用例。（Mock 专属）
 
 场景：
 - 并发登录：100 次请求全部成功，无死锁 / race condition
@@ -12,6 +12,8 @@ import time
 
 import allure
 import pytest
+
+pytestmark = pytest.mark.mock_only
 
 from core.base_request import HttpClient
 from core.mock_db import MockDB

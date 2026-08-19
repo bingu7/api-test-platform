@@ -1,4 +1,4 @@
-"""订单 + 异常路径 + 边界用例：数据驱动。"""
+"""订单 + 异常路径 + 边界用例：数据驱动。（Mock 专属：测 Flask Mock 订单/边界接口）"""
 from __future__ import annotations
 
 import allure
@@ -7,6 +7,8 @@ import pytest
 from core.base_request import HttpClient
 from utils.assert_helpers import assert_case_response
 from utils.excel_reader import filter_cases
+
+pytestmark = pytest.mark.mock_only
 
 
 def _extra_cases() -> list[dict]:

@@ -21,6 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11"]
+        test-env: ["dev", "real"]
 
     steps:
       - name: Checkout
@@ -34,7 +35,7 @@ jobs:
 
       - name: Run suite
         env:
-          TEST_ENV: dev
+          TEST_ENV: ${{ matrix.test-env }}
         run: |
           chmod +x scripts/ci_test.sh
           SUITE="${{ github.event.inputs.suite || 'full' }}"
@@ -45,12 +46,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: junit-py${{ matrix.python-version }}
+          name: junit-py${{ matrix.python-version }}-${{ matrix.test-env }}
           path: reports/junit.xml
 
       - name: Upload Allure results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: allure-results-py${{ matrix.python-version }}
+          name: allure-results-py${{ matrix.python-version }}-${{ matrix.test-env }}
           path: allure-results/
