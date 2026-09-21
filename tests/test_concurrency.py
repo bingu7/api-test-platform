@@ -3,7 +3,9 @@
 场景：
 - 并发登录：100 次请求全部成功，无死锁 / race condition
 - 并发读：多客户端同时查用户信息
-- 运行时可用 pytest-xdist 并行执行：pytest tests/ -n auto
+- 并行执行用：pytest tests/ -n auto --dist loadgroup
+  （loadgroup 保证打了 xdist_group 的链路用例不被拆到不同 worker——
+  每个 worker 是独立 MockServer/MockDB，拆开会因查不到对方建的单而挂）
 """
 from __future__ import annotations
 

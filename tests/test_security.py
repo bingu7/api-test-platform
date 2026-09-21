@@ -26,13 +26,15 @@ pytestmark = [pytest.mark.backend, pytest.mark.security]
 
 
 def _register_and_login(raw_client, username=None):
-    """注册一个普通用户并返回 (token, username)。"""
+    """注册一个普通用户并返回 (token, username)。任一环节失败立即断言，不放行到后面 KeyError。"""
     auth = AuthAPI(raw_client)
     cred = auth.random_credential()
     if username:
         cred["username"] = username
-    auth.register(cred["username"], cred["email"], cred["password"])
+    reg = auth.register(cred["username"], cred["email"], cred["password"])
+    assert reg.status_code == 201, f"注册失败: {reg.status_code} {reg.text[:200]}"
     r = auth.login(cred["username"], cred["password"])
+    assert r.status_code == 200, f"登录失败: {r.status_code} {r.text[:200]}"
     return r.json()["access_token"], cred["username"]
 
 
@@ -83,48 +85,48 @@ class TestIDOR:
     @allure.title("A 用户不能查 B 的订单 → 403")
     @pytest.mark.smoke
     def test_cannot_read_others_order(self, raw_client: HttpClient):
-        # admin 下一个单
-        admin_token, _ = _register_and_login(raw_client, f"idor_admin_{secrets.token_hex(3)}")
-        admin_client = make_user_client(raw_client.base_url, admin_token, raw_client.timeout)
+        # 用户 A 下一个单
+        owner_token, _ = _register_and_login(raw_client, f"idor_owner_{secrets.token_hex(3)}")
+        owner_client = make_user_client(raw_client.base_url, owner_token, raw_client.timeout)
         oid = f"IDOR_{secrets.token_hex(4)}"
-        OrderAPI(admin_client).create(oid, 10.0)
+        OrderAPI(owner_client).create(oid, 10.0)
 
-        # 普通用户尝试查 → 403
-        user_token, _ = _register_and_login(raw_client, f"idor_user_{secrets.token_hex(3)}")
-        user_client = make_user_client(raw_client.base_url, user_token, raw_client.timeout)
-        r = user_client.get(f"/api/orders/{oid}")
+        # 用户 B 尝试查 → 403
+        other_token, _ = _register_and_login(raw_client, f"idor_other_{secrets.token_hex(3)}")
+        other_client = make_user_client(raw_client.base_url, other_token, raw_client.timeout)
+        r = other_client.get(f"/api/orders/{oid}")
         attach_response(r)
         assert_status(r, 403)
-        admin_client.close(); user_client.close()
+        owner_client.close(); other_client.close()
 
     @allure.title("A 用户不能取消 B 的订单 → 403")
     def test_cannot_cancel_others_order(self, raw_client: HttpClient):
-        admin_token, _ = _register_and_login(raw_client, f"idor_a_{secrets.token_hex(3)}")
-        admin_client = make_user_client(raw_client.base_url, admin_token, raw_client.timeout)
+        owner_token, _ = _register_and_login(raw_client, f"idor_a_{secrets.token_hex(3)}")
+        owner_client = make_user_client(raw_client.base_url, owner_token, raw_client.timeout)
         oid = f"IDORC_{secrets.token_hex(4)}"
-        OrderAPI(admin_client).create(oid, 10.0)
+        OrderAPI(owner_client).create(oid, 10.0)
 
-        user_token, _ = _register_and_login(raw_client, f"idor_b_{secrets.token_hex(3)}")
-        user_client = make_user_client(raw_client.base_url, user_token, raw_client.timeout)
-        r = user_client.put(f"/api/orders/{oid}/cancel")
+        other_token, _ = _register_and_login(raw_client, f"idor_b_{secrets.token_hex(3)}")
+        other_client = make_user_client(raw_client.base_url, other_token, raw_client.timeout)
+        r = other_client.put(f"/api/orders/{oid}/cancel")
         attach_response(r)
         assert_status(r, 403)
-        admin_client.close(); user_client.close()
+        owner_client.close(); other_client.close()
 
     @allure.title("A 不能为 B 的订单支付/退款 → 403")
     def test_cannot_pay_others_order(self, raw_client: HttpClient):
-        admin_token, _ = _register_and_login(raw_client, f"idor_p_{secrets.token_hex(3)}")
-        admin_client = make_user_client(raw_client.base_url, admin_token, raw_client.timeout)
+        owner_token, _ = _register_and_login(raw_client, f"idor_p_{secrets.token_hex(3)}")
+        owner_client = make_user_client(raw_client.base_url, owner_token, raw_client.timeout)
         oid = f"IDORP_{secrets.token_hex(4)}"
-        OrderAPI(admin_client).create(oid, 10.0)
+        OrderAPI(owner_client).create(oid, 10.0)
 
-        user_token, _ = _register_and_login(raw_client, f"idor_q_{secrets.token_hex(3)}")
-        user_client = make_user_client(raw_client.base_url, user_token, raw_client.timeout)
+        other_token, _ = _register_and_login(raw_client, f"idor_q_{secrets.token_hex(3)}")
+        other_client = make_user_client(raw_client.base_url, other_token, raw_client.timeout)
         from apis import PaymentAPI
-        r = PaymentAPI(user_client).pay(oid)
+        r = PaymentAPI(other_client).pay(oid)
         attach_response(r)
         assert_status(r, 403)
-        admin_client.close(); user_client.close()
+        owner_client.close(); other_client.close()
 
 
 @allure.feature("接口安全")

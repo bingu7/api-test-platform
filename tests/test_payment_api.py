@@ -75,6 +75,21 @@ class TestPayment:
         assert_status(r, 400)
         assert_detail(r, "订单已支付")
 
+    @allure.title("幂等键被其他订单占用 → 400（不回放他人支付记录）")
+    def test_idempotency_key_bound_to_order(self, api_client: HttpClient):
+        order_api = OrderAPI(api_client)
+        payment_api = PaymentAPI(api_client)
+        oid_a = _new_order(order_api)
+        oid_b = _new_order(order_api)
+        shared_key = f"shared_{secrets.token_hex(8)}"
+        r1 = payment_api.pay(oid_a, idempotency_key=shared_key)
+        assert_status(r1, 200)
+        # 同一用户把同 key 用到另一笔订单 → 冲突，不允许返回订单 A 的支付单
+        r2 = payment_api.pay(oid_b, idempotency_key=shared_key)
+        attach_response(r2)
+        assert_status(r2, 400)
+        assert_detail(r2, "幂等键已被其他订单使用")
+
     @allure.title("退款已支付订单 → 200 且 refunded、订单回 pending")
     def test_refund(self, api_client: HttpClient):
         order_api = OrderAPI(api_client)
