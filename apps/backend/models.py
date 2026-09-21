@@ -8,18 +8,17 @@
 from __future__ import annotations
 
 import enum
-import time
-from datetime import datetime
+from datetime import datetime, timezone
 
-from sqlalchemy import ForeignKey, String, Integer, Float, DateTime, Enum as SAEnum
+from sqlalchemy import ForeignKey, String, Integer, Float, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.backend.database import Base
 
 
 def _now() -> datetime:
-    """记录创建/更新时间。统一用 datetime，避免 time.time() 的秒级精度。"""
-    return datetime.utcnow()
+    """记录创建/更新时间（UTC）。datetime.utcnow() 自 Python 3.12 起弃用。"""
+    return datetime.now(timezone.utc)
 
 
 class UserRole(str, enum.Enum):

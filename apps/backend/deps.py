@@ -43,8 +43,13 @@ async def get_current_user(
     user_id = payload.get("user_id")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token 缺少用户标识")
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        # 签名合法但 payload 畸形（user_id 非数字）→ 视为非法 token，绝不能抛 500
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token 用户标识非法")
 
-    user = (await db.execute(select(User).where(User.id == int(user_id)))).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
     return user
@@ -71,4 +76,8 @@ async def get_current_user_optional(
     user_id = payload.get("user_id")
     if not user_id:
         return None
-    return (await db.execute(select(User).where(User.id == int(user_id)))).scalar_one_or_none()
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    return (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.backend.database import get_db
 from apps.backend.deps import get_current_user
-from apps.backend.models import Order, OrderStatus, User
+from apps.backend.models import Order, OrderStatus, Product, User
 from apps.backend.schemas import OrderCreate, OrderOut
 
 router = APIRouter(prefix="/api/orders", tags=["订单"])
@@ -41,10 +41,16 @@ async def list_my_orders(db: AsyncSession = Depends(get_db),
 @router.post("", response_model=OrderOut, status_code=status.HTTP_201_CREATED)
 async def create_order(payload: OrderCreate, db: AsyncSession = Depends(get_db),
                        user: User = Depends(get_current_user)) -> Order:
-    """下单。订单号重复 → 400；金额 ≤ 0 → 422（Pydantic 已拦）。"""
+    """下单。订单号重复 → 400；金额 ≤ 0 → 422（Pydantic 已拦）；商品不存在 → 422。"""
     dupe = (await db.execute(select(Order).where(Order.order_id == payload.order_id))).scalar_one_or_none()
     if dupe is not None:
         raise HTTPException(status_code=400, detail="订单号已存在")
+
+    # 引用性校验：前端传了 product_id 就必须真实存在，否则收下的是「买不存在商品」的脏单
+    if payload.product_id is not None:
+        product = (await db.execute(select(Product).where(Product.id == payload.product_id))).scalar_one_or_none()
+        if product is None:
+            raise HTTPException(status_code=422, detail="商品不存在")
 
     order = Order(
         order_id=payload.order_id,

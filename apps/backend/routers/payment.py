@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.backend.database import get_db
@@ -40,6 +41,9 @@ async def pay(payload: PaymentCreate, db: AsyncSession = Depends(get_db),
         select(Payment).where(Payment.idempotency_key == payload.idempotency_key)
     )).scalar_one_or_none()
     if existing is not None:
+        # 幂等键复用必须指向同一笔订单，否则是客户端冲突（甚至串单），不能回放他人记录
+        if existing.order_id != payload.order_id:
+            raise HTTPException(status_code=400, detail="幂等键已被其他订单使用")
         # 幂等保护：即使 order 已发生状态变更，也只回放首次支付结果
         return existing
 
@@ -57,7 +61,17 @@ async def pay(payload: PaymentCreate, db: AsyncSession = Depends(get_db),
     )
     db.add(payment)
     order.status = OrderStatus.paid.value  # 推动订单状态机
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # 与并发同 key 请求撞了 unique 约束：回滚后回放先到的那条，绝不抛 500
+        await db.rollback()
+        winner = (await db.execute(
+            select(Payment).where(Payment.idempotency_key == payload.idempotency_key)
+        )).scalar_one_or_none()
+        if winner is not None and winner.order_id == payload.order_id:
+            return winner
+        raise HTTPException(status_code=400, detail="幂等键冲突，请更换 idempotency_key")
     await db.refresh(payment)
     return payment
 
