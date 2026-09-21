@@ -1,8 +1,8 @@
 """通用断言：减少测试里重复样板代码。"""
 from __future__ import annotations
 
+import json
 import re
-import time
 from typing import Any
 
 import allure
@@ -42,9 +42,12 @@ def assert_business(
             f"业务 code 不符: 期望 {expected_code}, 实际 {payload.get('code')}, body={payload}"
         )
     if expected_msg_contains:
-        message = str(payload.get("message", ""))
+        # 两套错误约定并存：Flask Mock 用 {"code","message"}，FastAPI 原生错误用 {"detail"}
+        # （422 时 detail 是 list，str() 化后做包含断言即可）
+        raw_msg = payload.get("message")
+        message = str(raw_msg if raw_msg is not None else payload.get("detail", ""))
         assert expected_msg_contains in message, (
-            f"message 未包含 '{expected_msg_contains}', 实际 '{message}'"
+            f"message/detail 未包含 '{expected_msg_contains}', 实际 '{message}'"
         )
     return payload
 
@@ -75,46 +78,99 @@ def assert_detail(response: Response, expected_contains: str | None = None) -> d
 
 
 # ── JSONPath 式断言（轻量实现，不引依赖） ──
-_TOKEN_RE = re.compile(r"""
-    \[
-        (?:
-            (\d+)              # 数字下标
-            |
-            '([^']+)'          # 字符串 key
-            |
-            "([^"]+)"          # 字符串 key 双引号
-        )
-    \]
+# 一次扫描整条路径，把每个 token 独立识别出来。
+# 分支顺序有讲究：方括号形式必须排在「字段名」之前——字段名正则已排除 [ ]，
+# 所以遇到 '[' 时数字下标/字符串下标会先命中，不会退化成一整段字段名。
+#   data.orders[0].order_id  →  field(data) field(orders) index(0) field(order_id)
+#   [0]                      →  index(0)
+#   a['b.c']                 →  field(a) key('b.c')   ← key 里可以含点号
+_PATH_TOKEN_RE = re.compile(r"""
+    \[\s*(?P<index>\d+)\s*\]            # [0]        数字下标
+  | \[\s*'(?P<skey>[^']*)'\s*\]         # ['key']    单引号字符串 key
+  | \[\s*"(?P<dkey>[^"]*)"\s*\]         # ["key"]    双引号字符串 key
+  | (?P<field>[^.\[\]]+)                # field      普通字段名
 """, re.VERBOSE)
 
 
+def _tokenize_path(path: str) -> list[tuple[str, Any]]:
+    """把路径字符串切成 [('key', 'data'), ('key', 'orders'), ('index', 0), ...]。
+
+    非法路径（如 'a[', 'a..['）会抛 ValueError，而不是被静默跳过——
+    静默跳过会让「路径写错」伪装成「字段不存在」，排障时很误导。
+    """
+    # 容忍 JSONPath 习惯写法：开头的 $ 与紧随其后的点号（$.data.x / $data.x）
+    stripped = path.strip()
+    if stripped.startswith("$"):
+        stripped = stripped[1:].lstrip(".")
+
+    tokens: list[tuple[str, Any]] = []
+    pos = 0
+    for m in _PATH_TOKEN_RE.finditer(stripped):
+        # 两个 token 之间只允许出现「一个点号」（或紧邻，如 orders[0]）。
+        # 连续点号 a..b 属于手误，要报错而不是被静默当成 a.b——否则打错路径
+        # 会表现为「字段不存在」，误导排障方向。
+        gap = "".join(stripped[pos:m.start()].split())
+        if gap not in ("", "."):
+            raise ValueError(f"路径片段 {gap!r} 无法解析（位置 {pos}）")
+        if m.group("index") is not None:
+            tokens.append(("index", int(m.group("index"))))
+        elif m.group("skey") is not None:
+            tokens.append(("key", m.group("skey")))
+        elif m.group("dkey") is not None:
+            tokens.append(("key", m.group("dkey")))
+        else:
+            tokens.append(("key", m.group("field")))
+        pos = m.end()
+
+    tail = "".join(stripped[pos:].split())
+    if tail:
+        raise ValueError(f"路径片段 {tail!r} 无法解析（位置 {pos}）")
+    if not tokens:
+        raise ValueError("路径为空")
+    return tokens
+
+
 def _resolve_path(data: Any, path: str) -> Any:
-    """按 'a.b[0].c' 这样的路径取值。支持点号 + 方括号（数字/字符串）。"""
+    """按 'a.b[0].c' 取值。支持点号字段名 + [数字] + ['字符串'] 三种下标，可任意嵌套。
+
+    >>> _resolve_path({'data': {'orders': [{'order_id': 'O1'}]}}, 'data.orders[0].order_id')
+    'O1'
+    """
     cur = data
-    # 把 a[0].b[1] 拆成 tokens
-    for part in path.split("."):
-        # 处理 part 内部的 [..]
-        idx = 0
-        while idx < len(part):
-            m = _TOKEN_RE.match(part, idx)
-            if m:
-                key = m.group(1) or m.group(2) or m.group(3)
-                if m.group(1) is not None:  # 数字下标
-                    cur = cur[int(key)]
-                else:
-                    cur = cur[key]
-                idx = m.end()
-            else:
-                # 普通字段名
-                key = part[idx:]
-                if key != "":
-                    cur = cur[key]
-                break
+    walked = ""
+    for kind, token in _tokenize_path(path):
+        if kind == "index":
+            label = f"[{token}]"
+        else:
+            label = f".{token}" if walked else str(token)
+        try:
+            cur = cur[token]
+        except KeyError as e:
+            raise KeyError(
+                f"路径 {path!r} 在 {walked or '<root>'}{label} 处字段不存在: {e}"
+            ) from e
+        except IndexError as e:
+            raise IndexError(
+                f"路径 {path!r} 在 {walked or '<root>'}{label} 处下标越界"
+                f"（当前长度 {len(cur)}）: {e}"
+            ) from e
+        except TypeError as e:
+            raise TypeError(
+                f"路径 {path!r} 在 {walked or '<root>'} 处无法用 {label!r} 取值"
+                f"（当前类型 {type(cur).__name__}）: {e}"
+            ) from e
+        walked += label
     return cur
 
 
 def assert_json_path(response: Response, path: str, expected: Any) -> dict[str, Any]:
-    """断言响应体里某路径的值 == expected。
+    """断言响应体里某路径的值 == expected，返回完整 payload。
+
+    路径写法（可任意嵌套）：
+        "data.orders[0].order_id"      点号 + 数字下标
+        "data.orders[0].items[1].name"
+        "['a.b']"                      含点号的 key 用引号包起来
+        "$.data.orders[0].id"          兼容 JSONPath 的 $ 前缀
 
     用法:
         assert_json_path(resp, "data.orders[0].order_id", "O1")
@@ -122,9 +178,15 @@ def assert_json_path(response: Response, path: str, expected: Any) -> dict[str, 
     payload = response.json()
     try:
         actual = _resolve_path(payload, path)
+    except ValueError as e:
+        # 路径本身写错（语法问题）≠ 响应结构不对，分开报错更好定位
+        raise AssertionError(
+            f"路径 {path!r} 语法非法: {e}\n"
+            "支持写法: a.b[0].c  或  a['b.c']  或  $.a.b[0]"
+        ) from e
     except (KeyError, IndexError, TypeError) as e:
         raise AssertionError(
-            f"路径 '{path}' 解析失败: {e}\n响应: {payload}"
+            f"路径 {path!r} 解析失败: {e}\n响应: {json.dumps(payload, ensure_ascii=False)[:500]}"
         ) from e
     assert actual == expected, (
         f"路径 '{path}' 值不符: 期望 {expected!r}, 实际 {actual!r}"

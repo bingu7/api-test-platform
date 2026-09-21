@@ -15,7 +15,13 @@ import pytest
 from apis import OrderAPI, AuthAPI
 from core.base_request import HttpClient
 from data.builders import OrderData
-from utils.assert_helpers import assert_status, attach_response, assert_detail, assert_paginated_list
+from utils.assert_helpers import (
+    assert_detail,
+    assert_json_path,
+    assert_paginated_list,
+    assert_status,
+    attach_response,
+)
 
 pytestmark = [pytest.mark.backend]
 
@@ -87,6 +93,9 @@ class TestOrderFlow:
         r = order_api.list()
         attach_response(r)
         assert_status(r, 200)
+        # 后端返回的是根级数组 [ {...}, {...} ]——用 JSONPath 断言扎进数组元素，
+        # 顺带覆盖「下标出现在路径开头/中间」的解析（[0].order_id）
+        assert_json_path(r, "[0].order_id", oid)
         ids = {o["order_id"] for o in r.json()}
         assert oid in ids
 
@@ -99,3 +108,11 @@ class TestOrderFlow:
         attach_response(r)
         assert_status(r, 200)
         assert r.json()["status"] == "cancelled"
+
+    @allure.title("下单引用不存在的商品 → 422（引用性校验）")
+    def test_create_order_with_ghost_product(self, api_client: HttpClient):
+        order_api = OrderAPI(api_client)
+        r = order_api.create(f"GHOST_{secrets.token_hex(4)}", 10.0, product_id=99999)
+        attach_response(r)
+        assert_status(r, 422)
+        assert_detail(r, "商品不存在")

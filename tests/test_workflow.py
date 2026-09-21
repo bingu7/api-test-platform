@@ -15,17 +15,27 @@
 - 因此「上一步产物传给下一步」应在 fixture 中显式注入，
   不要用类变量 / 全局变量隐式传递——本链路里 order_id 是硬编码常量，
   所以最简单稳妥的做法就是直接写字面量，避免引入「伪依赖」让人误以为存在强保证。
+- 并行执行注意：xdist 每个 worker 有独立的 MockServer/MockDB（内存库不跨进程共享），
+  链路各步骤若被分到不同 worker，step3 建的单在 step4 的库里不存在。
+  故本类打了 @pytest.mark.xdist_group("workflow")，
+  并行时请加 --dist loadgroup（同组用例捆绑到同一 worker 且保持顺序）：
+      pytest tests/ -n auto --dist loadgroup
 """
 from __future__ import annotations
 
 import allure
 import pytest
 
-pytestmark = pytest.mark.mock_only
+pytestmark = [pytest.mark.mock_only, pytest.mark.xdist_group("workflow")]
 
 from core.base_request import HttpClient
 from core.mock_db import MockDB
-from utils.assert_helpers import assert_business, assert_status, attach_response
+from utils.assert_helpers import (
+    assert_business,
+    assert_json_path,
+    assert_status,
+    attach_response,
+)
 
 
 @allure.feature("业务流程")
@@ -93,8 +103,18 @@ class TestWorkflow:
         orders = payload["data"]["orders"]
         assert isinstance(orders, list) and len(orders) >= 1
 
-        order_ids = {o["order_id"] for o in orders}
-        assert self.ORDER_ID in order_ids, f"新订单未出现在列表中，现有: {order_ids}"
+        # 用 JSONPath 式断言扎进嵌套结构——比手动 payload["data"]["orders"] 逐层取
+        # 更能表达「断言的是响应结构的哪一处」，路径写错时报错会直接指出断在哪一级。
+        # 先确认列表元素结构（下标 0 的元素形态固定，可安全断言字段）
+        assert_json_path(response, "data.orders[0].amount", orders[0]["amount"])
+
+        # 再定位到本次新建的那条订单。
+        # ⚠️ 不能用固定的 orders[0]：MockDB 用 dict 存储，list_orders() 按插入序返回，
+        #    种子单（ORD_DB_00001…）永远排在前面。写死下标会变成「依赖别人没先建单」的
+        #    脆弱断言，所以按下标动态拼路径。
+        idx = next(i for i, o in enumerate(orders) if o["order_id"] == self.ORDER_ID)
+        assert_json_path(response, f"data.orders[{idx}].order_id", self.ORDER_ID)
+        assert_json_path(response, f"data.orders[{idx}].status", "pending")
 
     def test_step5_pay_and_verify(self, api_client: HttpClient, mock_db: MockDB):
         """Step5: 支付 → 接口返回 paid → DB 也 paid。"""
