@@ -1,7 +1,9 @@
-"""框架自测：路径、Excel、配置、Token 错误路径（不依赖业务接口语义）。"""
+"""框架自测：路径、Excel、配置、Token 错误路径（不依赖业务接口语义）。（Mock 专属）"""
 from __future__ import annotations
 
 import pytest
+
+pytestmark = pytest.mark.mock_only
 
 from config.settings import get_settings
 from core.token_manager import TokenError, TokenManager

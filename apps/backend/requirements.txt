@@ -1,0 +1,10 @@
+# 后端被测系统(SUT)独立依赖 —— 安装命令:
+#   pip install -r apps/backend/requirements.txt
+# 与项目根 requirements.txt 分开，便于不同 Python 版本/环境按需安装。
+
+fastapi>=0.115.0,<1
+uvicorn[standard]>=0.30.0,<1
+sqlalchemy[asyncio]>=2.0.0,<3
+aiosqlite>=0.20.0,<1
+pydantic[email]>=2.7.0,<3
+PyJWT>=2.8.0,<3

@@ -29,8 +29,17 @@ htmlcov/
 .hermes/
 .deepeval/
 .serena/
+.zcode/
 IDEA.md
 skills-lock.json
+
+# 本地自查/审计笔记（只留本机，不随仓库公开）
+docs/REVIEW.md
+
+# Backend runtime artifacts (local SQLite db is regenerated on startup)
+apps/backend/*.db
+apps/backend/*.db-journal
+apps/backend/*.sqlite3
 
 # OS
 Thumbs.db

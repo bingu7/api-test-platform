@@ -1,12 +1,21 @@
 @echo off
-REM Windows Agent / 本机模拟 CI
-REM 用法: scripts\ci_test.bat smoke
-REM       scripts\ci_test.bat full
+REM Windows local CI simulation (mirrors Jenkins / GitHub Actions)
+REM Usage: scripts\ci_test.bat smoke
+REM        scripts\ci_test.bat full
 setlocal EnableExtensions
 cd /d "%~dp0\.."
 
 set SUITE=%~1
 if "%SUITE%"=="" set SUITE=full
+
+rem A half-installed .venv must not break the run: verify pip works, else recreate.
+if exist .venv\Scripts\python.exe (
+  .venv\Scripts\python.exe -m pip --version >nul 2>nul
+  if errorlevel 1 (
+    echo ==^> existing .venv looks broken ^(no pip^), recreating
+    rd /s /q .venv
+  )
+)
 
 if exist .venv\Scripts\python.exe (
   set PY=.venv\Scripts\python.exe
@@ -24,10 +33,12 @@ echo ==^> suite: %SUITE%
 echo ==^> install deps
 "%PY%" -m pip install -U pip -q
 "%PY%" -m pip install -r requirements.txt -q
+REM backend SUT deps (needed for real env)
+if exist apps\backend\requirements.txt "%PY%" -m pip install -r apps\backend\requirements.txt -q
 
 if not exist allure-results mkdir allure-results
 if not exist reports mkdir reports
-REM 清理旧产物，保留 .gitignore
+REM clean old artifacts, keep .gitignore
 del /q allure-results\* >nul 2>nul
 for /d %%D in (allure-results\*) do rd /s /q "%%D" >nul 2>nul
 del /q reports\* >nul 2>nul

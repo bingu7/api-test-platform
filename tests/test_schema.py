@@ -1,4 +1,4 @@
-"""JSON Schema 结构校验测试。
+"""JSON Schema 结构校验测试。（Mock 专属：验 Flask Mock 响应结构）
 
 面试场景：
   「你只断言了 payload["code"] == 0，但如果后端把 amount 从数字改成了字符串 "99.99"，能发现吗？」
@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import allure
 import pytest
+
+pytestmark = pytest.mark.mock_only
 
 from core.base_request import HttpClient
 from utils.assert_helpers import assert_status

@@ -75,8 +75,15 @@ agent { label 'python' }
 | 参数 | 含义 |
 |------|------|
 | `TEST_SUITE` | `smoke` 快返 / `full` 全量 |
-| `TEST_ENV` | 写入环境变量，供 `config/settings.py` 读取 |
+| `TEST_ENV` | `dev` / `real` / `test` / `staging`（写入环境变量给 `config/settings.py`） |
 | `CLEAN_WORKSPACE` | 排障时勾选，清理后重新 checkout |
+
+环境说明：
+
+- `dev` → Flask Mock，零外网
+- `real` → FastAPI 真实后端（由 `conftest.py` 的 `backend_server` fixture **自动起 uvicorn 子进程**，无需 Jenkins 配额外的进程托管步骤）
+- `test` → jsonplaceholder 公开 API
+- `staging` → 注入 `BASE_URL`/`AUTH_URL` 接你自己的服务
 
 环境变量（Job 配置 → Environment / Credentials Binding）：
 
@@ -130,7 +137,7 @@ Pipeline 里已有 `chmod +x`；若 SCM 丢弃可执行位，保持该 step 即�
 
 ### 5. 与 GitHub Actions 的关系
 
-本仓优先 Jenkins（测开/甲方常见）。若以后要 GH Actions，可复用 `scripts/ci_test.sh`，不必改 pytest 本身。
+本仓优先 Jenkins（测开/甲方常见）。若以后要 GH Actions，可复用 `scripts/ci_test.sh`，不必改 pytest 本身。仓库已有的 `.github/workflows/api-tests.yml` 会 matrix 并行跑 `dev` + `real` 两种环境，提交时自动验证。
 
 ---
 
