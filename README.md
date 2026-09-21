@@ -144,7 +144,9 @@ api-test-platform/
 | 测试文件 | 环境 | 维度 | 覆盖 |
 |----------|------|------|------|
 | `test_framework.py` | dev | 自检 | 路径/Excel/配置/Token |
+| `test_assert_helpers.py` | 全环境 | 框架自测 | 断言助手单元测试（路径解析/错误归类） |
 | `test_login.py` | dev | 数据驱动 | 登录正负向（Excel） |
+| `test_backend_data_driven.py` | **real** | **数据驱动** | 后端全模块正负向（Excel，auth 列控制鉴权） |
 | `test_user.py` | dev | 鉴权 | 取用户/无Token |
 | `test_orders.py` | dev | 数据驱动 | 订单/异常/边界（Excel） |
 | `test_payment.py` | dev | 双校验 | 支付+DB校验/超时 |
@@ -163,7 +165,10 @@ api-test-platform/
 | **`test_contract.py`** | **real** | **契约** | OpenAPI 规范/响应结构 |
 | **`test_data_preparation.py`** | **real** | **数据层** | Builder/Factory/清理 |
 
-合计 **约 140 用例**（dev 42 + real 71 + test 25 + 跨环境共享 fixture）。
+合计 **约 198 用例**（dev 85 + real 131 + test 68，含 43 个三环境共享的框架自测用例）。
+
+> 数字可自行复核：`TEST_ENV=dev python -m pytest tests/ --collect-only -q`
+> 切换 `TEST_ENV` 后收集总数相同（198），但实际执行数不同——其余用例按环境自动 skip。
 
 ---
 
@@ -246,6 +251,7 @@ api-test-platform/
 | Excel 路径走 `utils/paths` | 不写死相对 cwd |
 | 后端 DB 每次启动清空重建 | `lifespan` 调 `reset_and_seed`，保证测试隔离 |
 | 多用例随机账号 | `factories.fake_*()` / `AuthAPI.random_credential()` 避免撞库 |
+| 并行跑测试 | `pytest tests/ -n auto --dist loadgroup`（链路用例已打 `xdist_group`，会把同组步骤捆到同一 worker；每个 worker 起独立的 Mock/后端与独立 DB 文件） |
 | 提交前跑 `scripts/ci_test` | 与 CI/Jenkins 同入口 |
 
 ---
@@ -257,7 +263,7 @@ api-test-platform/
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 分层详解——为什么这样设计（主读） |
 | [docs/BACKEND.md](docs/BACKEND.md) | 被测后端怎么跑、怎么建表、怎么看 OpenAPI |
 | [docs/LEARNING.md](docs/LEARNING.md) | 10 天学习路径 |
-| [docs/FLOW.md]((docs/FLOW.md)) | 端到端交付流程图 |
+| [docs/FLOW.md](docs/FLOW.md) | 端到端交付流程图 |
 | [docs/JENKINS.md](docs/JENKINS.md) | Jenkins 安装与排障 |
 
 ---
