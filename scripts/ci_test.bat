@@ -8,6 +8,15 @@ cd /d "%~dp0\.."
 set SUITE=%~1
 if "%SUITE%"=="" set SUITE=full
 
+rem A half-installed .venv must not break the run: verify pip works, else recreate.
+if exist .venv\Scripts\python.exe (
+  .venv\Scripts\python.exe -m pip --version >nul 2>nul
+  if errorlevel 1 (
+    echo ==^> existing .venv looks broken ^(no pip^), recreating
+    rd /s /q .venv
+  )
+)
+
 if exist .venv\Scripts\python.exe (
   set PY=.venv\Scripts\python.exe
 ) else (

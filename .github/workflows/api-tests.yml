@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11"]
+        python-version: ["3.11", "3.12"]
         test-env: ["dev", "real"]
 
     steps:
@@ -48,6 +48,7 @@ jobs:
         with:
           name: junit-py${{ matrix.python-version }}-${{ matrix.test-env }}
           path: reports/junit.xml
+          retention-days: 7
 
       - name: Upload Allure results
         if: always()
@@ -55,3 +56,4 @@ jobs:
         with:
           name: allure-results-py${{ matrix.python-version }}-${{ matrix.test-env }}
           path: allure-results/
+          retention-days: 7

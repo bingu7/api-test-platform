@@ -12,13 +12,18 @@ This is also a minimal teaching example of:
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 import sqlite3
 
-# Resolve the db path the same way db_helper.py does, so this works from any cwd.
-DB_PATH = Path(__file__).resolve().parent.parent / "apps" / "backend" / "dev.db"
+# Resolve the db path the same way db_helper.py does (BACKEND_DB_PATH override included),
+# so this works from any cwd.
+DB_PATH = Path(os.getenv(
+    "BACKEND_DB_PATH",
+    Path(__file__).resolve().parent.parent / "apps" / "backend" / "dev.db",
+))
 
 
 def dump(conn: sqlite3.Connection, table: str) -> None:
