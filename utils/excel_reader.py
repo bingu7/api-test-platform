@@ -9,6 +9,7 @@ Excel 数据驱动读取。
 - expected_status (必填)
 - expected_code (可选)
 - expected_msg (可选)
+- auth (可选：1/0/true/false，表示该用例是否需要带 Token；缺省 None，由测试侧按接口设计兜底)
 """
 from __future__ import annotations
 
@@ -35,6 +36,18 @@ def _cell_str(value: Any) -> str | None:
     if text == "" or text.lower() == "nan":
         return None
     return text
+
+
+def _parse_bool(raw: Any) -> bool | None:
+    """解析 Excel 里的布尔单元格：1/true/yes → True；0/false/no → False；空 → None。"""
+    text = _cell_str(raw)
+    if text is None:
+        return None
+    if text.lower() in ("1", "true", "yes", "是"):
+        return True
+    if text.lower() in ("0", "false", "no", "否"):
+        return False
+    raise ValueError(f"auth 列不是合法布尔值: {text!r}")
 
 
 def _parse_body(raw: Any) -> dict | list | None:
@@ -98,6 +111,7 @@ def read_test_cases(file_path: str | Path | None = None) -> list[dict[str, Any]]
                 "expected_status": expected_status,
                 "expected_code": expected_code,
                 "expected_msg": _cell_str(row.get("expected_msg")),
+                "auth": _parse_bool(row.get("auth")),
             }
         )
     return cases

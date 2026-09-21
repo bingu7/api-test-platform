@@ -50,8 +50,11 @@ class HttpClient:
         session.mount("https://", adapter)
         return session
 
-    def _build_headers(self, auth: bool, extra: dict | None) -> dict[str, str]:
-        headers: dict[str, str] = {"Content-Type": "application/json"}
+    def _build_headers(self, auth: bool, extra: dict | None, with_body: bool) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        # GET/DELETE 等无请求体的调用不强制塞 Content-Type，避免被严格网关/WAF 拒
+        if with_body:
+            headers["Content-Type"] = "application/json"
         if auth and self.token_manager is not None:
             headers["Authorization"] = f"Bearer {self.token_manager.get_token()}"
         if extra:
@@ -75,7 +78,8 @@ class HttpClient:
         if not endpoint.startswith("/"):
             endpoint = "/" + endpoint
         url = f"{self.base_url}{endpoint}"
-        final_headers = self._build_headers(auth=auth, extra=headers)
+        with_body = "json" in kwargs or "data" in kwargs or "files" in kwargs
+        final_headers = self._build_headers(auth=auth, extra=headers, with_body=with_body)
         final_timeout = timeout or self.timeout
 
         logger.debug("%s %s auth=%s", method.upper(), url, auth)
@@ -86,20 +90,20 @@ class HttpClient:
             headers=final_headers,
             timeout=final_timeout,
             **kwargs,
-    )
+        )
 
         # 401 自动重登（仅当需要鉴权且 TokenManager 可用时）
         if auth and response.status_code == 401 and self.token_manager is not None:
             logger.info("收到 401，尝试刷新 token 并重试")
             self.token_manager.invalidate()
-            retry_headers = self._build_headers(auth=True, extra=headers)
+            retry_headers = self._build_headers(auth=True, extra=headers, with_body=with_body)
             response = self.session.request(
                 method=method.upper(),
                 url=url,
                 headers=retry_headers,
                 timeout=final_timeout,
                 **kwargs,
-    )
+            )
 
         return response
 

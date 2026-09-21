@@ -25,7 +25,7 @@ import pytest
 from config.settings import Settings, get_settings
 from core.base_request import HttpClient
 from core.mock_db import MockDB
-from core.mock_server import MockServer, start_mock_server
+from core.mock_server import MockServer
 from core.token_manager import TokenManager
 from utils.logger import get_logger
 from utils.paths import ALLURE_RESULTS_DIR, PROJECT_ROOT
@@ -131,6 +131,8 @@ def backend_server(is_backend_env: bool, settings: Settings):
     from core.backend_server import BackendServer
 
     srv = BackendServer(host=settings.mock_host, port=None)
+    # 同步给本进程：db_helper 白盒断言与后端落库指向同一个 DB 文件（xdist 下按 worker 隔离）
+    os.environ["BACKEND_DB_PATH"] = str(srv.db_path)
     srv.start()
     try:
         yield srv

@@ -274,15 +274,19 @@ class MockServer:
         return self
 
     def _wait_ready(self, timeout: float) -> None:
+        # 探测一个 GET 路由并显式判断状态码（无 token 时预期 401）；
+        # 之前探测只接受 POST 的 /api/login，是靠「Flask 返回 405 不抛异常」碰巧判活的。
         deadline = time.time() + timeout
         probe = requests.Session()
         probe.trust_env = False
         while time.time() < deadline:
             try:
-                probe.get(f"{self.base_url}/api/login", timeout=0.3)
-                return
+                r = probe.get(f"{self.base_url}/api/orders", timeout=0.3)
+                if r.status_code in (200, 401):
+                    return
             except requests.RequestException:
-                time.sleep(0.05)
+                pass
+            time.sleep(0.05)
         raise RuntimeError(f"Mock 服务在 {timeout}s 内未就绪: {self.base_url}")
 
     def stop(self) -> None:

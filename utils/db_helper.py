@@ -9,14 +9,16 @@
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 from utils.paths import PROJECT_ROOT
 
-# 后端 SQLite 文件：与 apps/backend/database.py 里的默认路径一致
-DEFAULT_DB_PATH = PROJECT_ROOT / "apps" / "backend" / "dev.db"
+# 后端 SQLite 文件：与 apps/backend/database.py 一致，同样尊重 BACKEND_DB_PATH 覆盖，
+# 否则自定义 DB 路径时白盒断言会打到错误文件上。
+DEFAULT_DB_PATH = Path(os.getenv("BACKEND_DB_PATH", PROJECT_ROOT / "apps" / "backend" / "dev.db"))
 
 
 class DBHelper:

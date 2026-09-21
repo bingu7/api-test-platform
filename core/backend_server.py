@@ -44,12 +44,25 @@ class BackendServer:
         self.host = host
         self.port = port if port is not None else _pick_free_port(host)
         self._proc: subprocess.Popen | None = None
-        # 后端启动前清掉旧的 DB 文件，让 lifespan 重建一个干净的库
-        db_path = Path(os.getenv("BACKEND_DB_PATH", PROJECT_ROOT / "apps" / "backend" / "dev.db"))
-        if db_path.exists():
+        # 并行时每个 xdist worker 用独立 DB 文件（pytest-xdist 注入 PYTEST_XDIST_WORKER=gw0/gw1/…），
+        # 否则多个 worker 会互删同一个 dev.db。用户显式指定 BACKEND_DB_PATH 时尊重用户。
+        worker = os.getenv("PYTEST_XDIST_WORKER")
+        default_db = PROJECT_ROOT / "apps" / "backend" / (f"dev_{worker}.db" if worker else "dev.db")
+        self._db_path = Path(os.getenv("BACKEND_DB_PATH", default_db))
+
+    @property
+    def db_path(self) -> Path:
+        return self._db_path
+
+    def _clear_db_file(self) -> None:
+        """启动前清掉旧的 DB 文件，让 lifespan 重建一个干净的库。
+
+        注意放在 start() 里调用而不是 __init__——构造对象不应有删文件的副作用。
+        """
+        if self._db_path.exists():
             try:
-                db_path.unlink()
-                logger.info("已清空旧 DB 文件: %s", db_path)
+                self._db_path.unlink()
+                logger.info("已清空旧 DB 文件: %s", self._db_path)
             except OSError:
                 pass
 
@@ -63,8 +76,11 @@ class BackendServer:
 
     def start(self, ready_timeout: float = 15.0) -> "BackendServer":
         """启动 uvicorn 子进程并等待就绪。"""
+        self._clear_db_file()
         env = os.environ.copy()
         env["BACKEND_PORT"] = str(self.port)
+        # 让子进程把表建到与本实例一致的 DB 文件（xdist worker 隔离的关键）
+        env["BACKEND_DB_PATH"] = str(self._db_path)
 
         cmd = [
             sys.executable, "-m", "uvicorn",
