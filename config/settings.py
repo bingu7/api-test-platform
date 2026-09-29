@@ -2,8 +2,13 @@
 多环境配置。
 
 优先级：环境变量 > 各环境默认值。
-- TEST_ENV: dev | test | staging
+- TEST_ENV: dev | test | real | staging
 - BASE_URL / AUTH_URL / API_USERNAME / API_PASSWORD / CONNECT_TIMEOUT / READ_TIMEOUT
+
+三种核心环境：
+- dev   → Flask Mock（本地假数据，零外网）
+- real  → 真实 FastAPI 后端（电商：用户/商品/订单/支付 + JWT + SQLite）
+- test  → jsonplaceholder.typicode.com（公开免费 API，无鉴权）
 
 注意：不要用 USERNAME 作为环境变量名——Windows 系统自带 USERNAME=当前登录用户，会污染配置。
 """
@@ -53,6 +58,14 @@ _DEFAULTS: dict[str, dict] = {
         "auth_url": "https://jsonplaceholder.typicode.com/posts",  # 无真实 auth，用 posts 代替
         "username": "",   # JSONPlaceholder 无鉴权
         "password": "",   # JSONPlaceholder 无鉴权
+    },
+    "real": {
+        # 真实 FastAPI 后端由 conftest 的 BackendServer 子进程启动，
+        # base_url/auth_url 实际会被 fixture 覆盖为运行时端口；这里占位
+        "base_url": "http://127.0.0.1:8000",
+        "auth_url": "http://127.0.0.1:8000/api/auth/login",
+        "username": "admin",
+        "password": "admin123",
     },
     "staging": {
         "base_url": "https://staging.example.com",

@@ -1,14 +1,5 @@
-"""边界 + 异常用例测试。
+"""边界 + 异常用例测试。（Mock 专属：覆盖 Flask Mock 的边界接口）"""
 
-覆盖面试常见场景：
-- 字段缺失 / 非法类型 / 空 body
-- 超大 payload
-- 查询不存在的资源
-- 服务端内部错误（500）
-- Content-Type 错误
-
-设计：部分用例走 Excel 数据驱动，部分直接代码断言（演示两种风格）。
-"""
 from __future__ import annotations
 
 import allure
@@ -16,6 +7,8 @@ import pytest
 
 from core.base_request import HttpClient
 from utils.assert_helpers import assert_business, assert_status, attach_response
+
+pytestmark = pytest.mark.mock_only
 
 
 @allure.feature("边界测试")

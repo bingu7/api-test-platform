@@ -1,4 +1,4 @@
-"""用户模块：鉴权 + 结构断言。"""
+"""用户模块：鉴权 + 结构断言。（Mock 专属：测 Flask Mock 用户接口）"""
 from __future__ import annotations
 
 import allure
@@ -6,6 +6,8 @@ import pytest
 
 from core.base_request import HttpClient
 from utils.assert_helpers import assert_business, assert_status, attach_response
+
+pytestmark = pytest.mark.mock_only
 
 
 @allure.feature("用户模块")

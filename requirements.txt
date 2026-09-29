@@ -1,3 +1,6 @@
+# 测试框架主依赖 —— 用 `pip install -r requirements.txt` 安装。
+# 后端被测系统的独立依赖见 apps/backend/requirements.txt（real 环境需另装）。
+
 # HTTP & test
 requests>=2.31.0,<3
 urllib3>=2.0,<3

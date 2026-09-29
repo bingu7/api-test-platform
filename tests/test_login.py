@@ -1,4 +1,4 @@
-"""登录接口：数据驱动 + 裸请求（auth=False）。"""
+"""登录接口：数据驱动 + 裸请求（auth=False）。（Mock 专属：测试 Flask Mock 的 /api/login）"""
 from __future__ import annotations
 
 import allure
@@ -7,6 +7,8 @@ import pytest
 from core.base_request import HttpClient
 from utils.assert_helpers import assert_case_response
 from utils.excel_reader import filter_cases
+
+pytestmark = pytest.mark.mock_only
 
 
 def _login_cases() -> list[dict]:

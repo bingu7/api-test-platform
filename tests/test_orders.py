@@ -1,4 +1,4 @@
-"""订单 + 异常路径 + 边界用例：数据驱动。"""
+"""订单 + 异常路径 + 边界用例：数据驱动。（Mock 专属：测 Flask Mock 订单/边界接口）"""
 from __future__ import annotations
 
 import allure
@@ -7,6 +7,8 @@ import pytest
 from core.base_request import HttpClient
 from utils.assert_helpers import assert_case_response
 from utils.excel_reader import filter_cases
+
+pytestmark = pytest.mark.mock_only
 
 
 def _extra_cases() -> list[dict]:
@@ -32,8 +34,10 @@ def pytest_generate_tests(metafunc):
 def test_extra_data_driven(extra_case: dict, api_client: HttpClient):
     allure.dynamic.title(extra_case["name"])
 
-    # 鉴权判断：登录已在 Excel 覆盖；订单/边界接口按需
-    needs_auth = extra_case["endpoint"] in {"/api/orders", "/api/orders/NONEXIST_BY_EXCEL"}
+    # 是否带 Token 由 Excel 的 auth 列决定；列缺省时按 Mock 接口设计兜底（订单接口需登录）
+    needs_auth = extra_case.get("auth")
+    if needs_auth is None:
+        needs_auth = extra_case["endpoint"].startswith("/api/orders")
     response = api_client.request(
         extra_case["method"],
         extra_case["endpoint"],

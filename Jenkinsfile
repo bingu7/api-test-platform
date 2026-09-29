@@ -20,8 +20,8 @@ pipeline {
     )
     choice(
       name: 'TEST_ENV',
-      choices: ['dev', 'test', 'staging'],
-      description: '配置环境名（见 config/settings.py）'
+      choices: ['dev', 'real', 'test', 'staging'],
+      description: 'dev=Flask Mock / real=FastAPI后端 / test=jsonplaceholder / staging=自定义'
     )
     booleanParam(
       name: 'CLEAN_WORKSPACE',
